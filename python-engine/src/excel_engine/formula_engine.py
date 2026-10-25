@@ -586,4 +586,20 @@ def calculate(section: str, product_type: str, inputs: Mapping[str, Any]) -> Cal
     )
 
 
-__all__ = ["CalculationResult", "calculate"]
+# Formula text is kept in a separate module so numeric calculations remain
+# untouched, while the public engine API exposes one consistent dispatcher.
+from . import formula_strings as _formula_strings
+
+excel_input_references = _formula_strings.excel_input_references
+formula_strings = _formula_strings.formula_strings
+for _formula_name in _formula_strings.__all__:
+    if _formula_name not in {"excel_input_references", "formula_strings"}:
+        globals()[_formula_name] = getattr(_formula_strings, _formula_name)
+
+
+__all__ = [
+    "CalculationResult",
+    "FormulaInputs",
+    "calculate",
+    *_formula_strings.__all__,
+]

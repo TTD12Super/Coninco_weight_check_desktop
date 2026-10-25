@@ -88,20 +88,32 @@ def _product_type(description: Any) -> str:
     rules = (
         ("square_round_reducer", ("square round reducer", "giam vuong tron")),
         ("square_elbow", ("square elbow", "co vuong")),
-        ("technical_louver_box", ("plenum box", "technical room", "louver")),
-        ("end_cap", ("end cap", "bit dau")),
-        ("reducer", ("reducer", "giam cap")),
+        ("technical_louver_box", ("plenum box", "technical room", "box gio phong ky thuat", "louver")),
+        ("fcu_reducer_box", ("box cap giam fcu",)),
+        ("return_fcu_box", ("box hoi fcu",)),
+        ("fcu_box", ("box cap fcu",)),
+        ("air_outlet_box", ("box cap mieng gio",)),
+        ("end_cap", ("end cap", "bit dau", "bit đau", "bi dau")),
+        ("stiffener", ("stiffener", "boc tang cung")),
+        ("reducer", ("reducer", "giam cap", "giam")),
         ("tee", ("tee", "three-way", "chac 3")),
         ("takeoff", ("take off", "takeoff", "chan re")),
-        ("elbow", ("elbow", "co 90", "co 45", "co tron")),
-        ("nrd_valve", ("vcd", "nrd", "van chinh gio")),
+        # Check valves before elbows.  A bare substring such as ``co`` must
+        # never classify ``control damper`` as a square/round elbow.
         ("mfd_valve", ("fire damper", "mfd", "msd", "van ngan chay")),
-        ("round_duct", ("flexible air duct", "ong gio mem")),
+        ("nrd_valve", ("vcd", "nrd", "van chinh gio", "volume control damper")),
+        ("elbow", ("elbow", "co 90", "co 45", "co tron")),
+        ("round_duct", ("flexible air duct", "ong gio mem", "ong gio thang tron")),
         ("rectangular_duct", ("air duct", "ong gio")),
     )
     for product_type, keywords in rules:
         if any(keyword in text for keyword in keywords):
             return product_type
+
+    # The reference workbook has a short name ``Co``. Use a word boundary so
+    # it remains distinct from ``control`` in Volume Control Damper.
+    if re.search(r"\bco\b", text):
+        return "elbow"
 
     if re.search(r"\b(fd)\b", text):
         return "mfd_valve"
@@ -143,7 +155,12 @@ class ProductFormat:
             a=_number(row, "a"),
             t=_number(row, "t"),
             Q=_number(row, "Q"),
-            K=_number(row, "K_By_function" if "K_By_function" in row else "K"),
+            K=_number(
+                row,
+                "K_for_formula"
+                if "K_for_formula" in row
+                else ("K_By_function" if "K_By_function" in row else "K"),
+            ),
         )
 
     def calculate(self, row: Mapping[str, Any]) -> CalculationResult:

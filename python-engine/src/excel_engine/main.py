@@ -10,6 +10,7 @@ from typing import Any
 from .contractor_processor import process_workbook
 from .excel_reader import read_workbook
 from .formula_engine import calculate
+from .formula_catalog import build_formula_catalog, list_reference_sheets
 from .workbook_report import export_calculated_workbook
 
 
@@ -38,12 +39,43 @@ def process_request(request: dict[str, Any]) -> dict[str, Any]:
         except (KeyError, TypeError, ValueError, OSError) as error:
             return {"ok": False, "files": [], "errors": [{"message": str(error)}]}
 
+    if request.get("action") == "list_reference_sheets":
+        try:
+            sheets = list_reference_sheets(request["path"])
+            return {
+                "ok": True,
+                "result": {"sheets": [{"name": name} for name in sheets]},
+                "files": [],
+                "errors": [],
+            }
+        except (KeyError, TypeError, ValueError, OSError) as error:
+            return {"ok": False, "files": [], "errors": [{"message": str(error)}]}
+
+    if request.get("action") == "load_reference_catalog":
+        try:
+            catalog = build_formula_catalog(request["path"], request.get("sheet"))
+            return {
+                "ok": True,
+                "result": {
+                    "sheet": catalog["sheet"],
+                    "entries": catalog["entries"],
+                    "count": catalog["count"],
+                },
+                "files": [],
+                "errors": [],
+            }
+        except (KeyError, TypeError, ValueError, OSError) as error:
+            return {"ok": False, "files": [], "errors": [{"message": str(error)}]}
+
     if request.get("action") == "export_calculated_workbook":
         try:
             result = export_calculated_workbook(
                 request["path"],
                 request.get("output"),
                 request.get("sheet", "02"),
+                request.get("reference_path"),
+                request.get("reference_sheet"),
+                request.get("reference_catalog"),
             )
             return {
                 "ok": True,

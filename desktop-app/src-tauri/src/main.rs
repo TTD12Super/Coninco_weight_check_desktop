@@ -31,6 +31,7 @@ struct AuditResult {
     sheet: String,
     rows: i64,
     mismatches: i64,
+    reference_formulas: i64,
 }
 
 fn app_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -51,14 +52,185 @@ fn choose_workbook() -> Option<String> {
 }
 
 #[tauri::command]
+fn choose_reference_workbook() -> Option<String> {
+    FileDialog::new().add_filter("Formula reference workbook", &["xlsx", "xls", "numbers"]).pick_file().map(|path| path.to_string_lossy().to_string())
+}
+
+fn reference_storage_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_root(app)?.join("formula-reference"))
+}
+
+fn reference_manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_root(app)?.join("formula-reference-path.txt"))
+}
+
+fn formula_catalog_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(reference_storage_dir(app)?.join("formula-catalog.json"))
+}
+
+fn remove_path(path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())?;
+    } else if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn copy_path(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_dir() {
+        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            copy_path(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+    } else {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::copy(source, destination).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn cached_formula_catalog(
+    app: &AppHandle,
+    reference_path: &Path,
+    reference_sheet: &str,
+) -> Result<Option<Value>, String> {
+    let cache_path = formula_catalog_cache_path(app)?;
+    if !cache_path.is_file() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(cache_path).map_err(|error| error.to_string())?;
+    let cached: Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let expected_path = reference_path.to_string_lossy();
+    let same_source = cached.get("reference_path").and_then(Value::as_str) == Some(expected_path.as_ref());
+    let same_sheet = cached.get("reference_sheet").and_then(Value::as_str) == Some(reference_sheet);
+    if !same_source || !same_sheet {
+        return Ok(None);
+    }
+    Ok(cached.get("catalog").cloned().filter(|catalog| catalog.get("entries").and_then(Value::as_array).is_some()))
+}
+
+fn load_or_create_formula_catalog(
+    app: &AppHandle,
+    reference_path: &Path,
+    reference_sheet: &str,
+) -> Result<Value, String> {
+    if let Some(catalog) = cached_formula_catalog(app, reference_path, reference_sheet)? {
+        return Ok(catalog);
+    }
+    if !reference_path.is_file() {
+        return Err("Formula reference workbook does not exist and its JSON catalog is unavailable.".into());
+    }
+    let response = run_engine(app, serde_json::json!({
+        "action": "load_reference_catalog",
+        "path": reference_path,
+        "sheet": reference_sheet,
+    }))?;
+    let catalog = response.get("result").cloned().ok_or("Python did not return the formula catalog.")?;
+    let cache_path = formula_catalog_cache_path(app)?;
+    let cache = serde_json::json!({
+        "reference_path": reference_path.to_string_lossy(),
+        "reference_sheet": reference_sheet,
+        "catalog": catalog,
+    });
+    fs::write(cache_path, serde_json::to_vec_pretty(&cache).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    Ok(cache.get("catalog").cloned().unwrap_or(Value::Null))
+}
+
+#[tauri::command]
+fn get_reference_workbook(app: AppHandle) -> Result<Option<String>, String> {
+    let manifest = reference_manifest_path(&app)?;
+    if !manifest.is_file() {
+        return Ok(None);
+    }
+    let saved = fs::read_to_string(manifest).map_err(|error| error.to_string())?;
+    let path = PathBuf::from(saved.trim());
+    Ok(path.exists().then(|| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn save_reference_workbook(app: AppHandle, path: String) -> Result<String, String> {
+    let source = PathBuf::from(path);
+    if !source.is_file() && !source.is_dir() {
+        return Err("Formula reference workbook does not exist.".into());
+    }
+    let root = app_root(&app)?;
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let staging = root.join("formula-reference-new");
+    let storage = reference_storage_dir(&app)?;
+    remove_path(&staging)?;
+    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let stored_file = staging.join(source.file_name().unwrap_or_default());
+    copy_path(&source, &stored_file)?;
+    remove_path(&storage)?;
+    fs::rename(&staging, &storage).map_err(|error| error.to_string())?;
+    let stored_path = storage.join(source.file_name().unwrap_or_default());
+    fs::write(reference_manifest_path(&app)?, stored_path.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
+    remove_path(&formula_catalog_cache_path(&app)?)?;
+    Ok(stored_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn clear_reference_workbook(app: AppHandle) -> Result<(), String> {
+    remove_path(&reference_storage_dir(&app)?)?;
+    remove_path(&reference_manifest_path(&app)?)
+}
+
+#[tauri::command]
 fn list_sheets(app: AppHandle, path: String) -> Result<Vec<String>, String> {
     let response = run_engine(&app, serde_json::json!({"action": "list_sheets", "path": path}))?;
     response.get("result").and_then(|result| result.get("sheets")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| item.get("name").and_then(Value::as_str)).map(String::from).collect()).ok_or_else(|| "Python did not return worksheets.".into())
 }
 
 #[tauri::command]
-fn run_audit(app: AppHandle, path: String, sheet: String) -> Result<AuditResult, String> {
+fn list_reference_sheets(app: AppHandle, path: String) -> Result<Vec<String>, String> {
+    let response = run_engine(&app, serde_json::json!({"action": "list_reference_sheets", "path": path}))?;
+    response.get("result").and_then(|result| result.get("sheets")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| item.get("name").and_then(Value::as_str)).map(String::from).collect()).ok_or_else(|| "Python did not return reference worksheets.".into())
+}
+
+#[tauri::command]
+fn load_reference_catalog(app: AppHandle, path: String, sheet: String) -> Result<Vec<Value>, String> {
+    let catalog = load_or_create_formula_catalog(&app, &PathBuf::from(path), &sheet)?;
+    catalog
+        .get("entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "Python did not return the formula catalog.".into())
+}
+
+#[tauri::command]
+fn export_formula_catalog(app: AppHandle, path: String, sheet: String) -> Result<Option<String>, String> {
+    let reference = PathBuf::from(path);
+    let catalog = load_or_create_formula_catalog(&app, &reference, &sheet)?;
+    let Some(target) = FileDialog::new()
+        .add_filter("JSON file", &["json"])
+        .set_file_name("formula-catalog.json")
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    let export = serde_json::json!({
+        "reference_path": reference.to_string_lossy(),
+        "reference_sheet": sheet,
+        "catalog": catalog,
+    });
+    fs::write(&target, serde_json::to_vec_pretty(&export).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("Could not save formula catalog JSON: {error}"))?;
+    Ok(Some(target.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn run_audit(app: AppHandle, path: String, sheet: String, reference_path: String, reference_sheet: String) -> Result<AuditResult, String> {
     let source = PathBuf::from(path);
+    let reference = PathBuf::from(reference_path);
+    let catalog = load_or_create_formula_catalog(&app, &reference, &reference_sheet)?;
     let root = app_root(&app)?;
     let id = Uuid::new_v4().to_string();
     let submitted_dir = root.join("submitted");
@@ -68,13 +240,14 @@ fn run_audit(app: AppHandle, path: String, sheet: String) -> Result<AuditResult,
     let submitted = submitted_dir.join(format!("{}_{}", &id[..8], source.file_name().unwrap_or_default().to_string_lossy()));
     let processed = processed_dir.join(format!("{}_calculated.xlsx", id));
     fs::copy(&source, &submitted).map_err(|error| error.to_string())?;
-    let response = run_engine(&app, serde_json::json!({"action":"export_calculated_workbook", "path": submitted, "output": processed, "sheet": sheet}))?;
+    let response = run_engine(&app, serde_json::json!({"action":"export_calculated_workbook", "path": submitted, "output": processed, "sheet": sheet, "reference_path": reference, "reference_sheet": reference_sheet, "reference_catalog": catalog}))?;
     let result = response.get("result").ok_or("Python did not return an audit result")?;
     let rows = result.get("calculated_count").and_then(Value::as_i64).unwrap_or(0);
     let mismatches = result.get("mismatch_count").and_then(Value::as_i64).unwrap_or(0);
+    let reference_formulas = result.get("reference_formula_count").and_then(Value::as_i64).unwrap_or(0);
     let connection = database(&app)?;
     connection.execute("INSERT INTO audits VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'COMPLETED', ?7, ?8, ?9)", params![id, submitted.to_string_lossy(), processed.to_string_lossy(), source.file_name().unwrap_or_default().to_string_lossy(), processed.file_name().unwrap_or_default().to_string_lossy(), sheet, rows, mismatches, Utc::now().to_rfc3339()]).map_err(|error| error.to_string())?;
-    Ok(AuditResult { id, submitted_name: source.file_name().unwrap_or_default().to_string_lossy().to_string(), processed_name: processed.file_name().unwrap_or_default().to_string_lossy().to_string(), sheet, rows, mismatches })
+    Ok(AuditResult { id, submitted_name: source.file_name().unwrap_or_default().to_string_lossy().to_string(), processed_name: processed.file_name().unwrap_or_default().to_string_lossy().to_string(), sheet, rows, mismatches, reference_formulas })
 }
 
 fn run_engine(app: &AppHandle, request: Value) -> Result<Value, String> {
@@ -148,13 +321,33 @@ fn load_comparison(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
     let path: String = connection.query_row("SELECT processed_path FROM audits WHERE id = ?1", [&id], |row| row.get(0)).map_err(|error| error.to_string())?;
     let preview = Path::new(&path).with_file_name(format!("{}_preview.tsv", Path::new(&path).file_stem().unwrap_or_default().to_string_lossy()));
     let text = fs::read_to_string(preview).map_err(|error| error.to_string())?;
-    let mut lines = text.lines(); let headers: Vec<&str> = lines.next().unwrap_or_default().split('\t').collect();
-    Ok(lines.map(|line| headers.iter().zip(line.split('\t')).map(|(key, value)| ((*key).to_string(), Value::String((*value).to_string()))).collect::<serde_json::Map<_, _>>().into()).collect())
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .has_headers(true)
+        .from_reader(text.as_bytes());
+    let headers = reader
+        .headers()
+        .map_err(|error| format!("Could not read comparison headers: {error}"))?
+        .iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    reader
+        .records()
+        .map(|record| {
+            let record = record.map_err(|error| format!("Could not read comparison row: {error}"))?;
+            Ok(headers
+                .iter()
+                .zip(record.iter())
+                .map(|(key, value)| (key.clone(), Value::String(value.to_owned())))
+                .collect::<serde_json::Map<_, _>>()
+                .into())
+        })
+        .collect()
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![choose_workbook, list_sheets, run_audit, list_archive, delete_archive, download_archive, open_archive_file, load_comparison])
+        .invoke_handler(tauri::generate_handler![choose_workbook, choose_reference_workbook, get_reference_workbook, save_reference_workbook, clear_reference_workbook, list_sheets, list_reference_sheets, load_reference_catalog, export_formula_catalog, run_audit, list_archive, delete_archive, download_archive, open_archive_file, load_comparison])
         .run(tauri::generate_context!())
         .expect("error while running CONINCO Excel Auditor");
 }

@@ -8,7 +8,7 @@ import {
   chooseWorkbook, deleteArchive, downloadArchive, listArchive, listSheets, loadComparison,
   openArchiveFile, runAudit,
 } from "./lib/engine";
-import type { ArchiveEntry, ComparisonRow, Page } from "./types";
+import type { ArchiveEntry, ComparisonRow, FormulaAudit, Page } from "./types";
 
 const n = (value: number) => value.toFixed(3);
 
@@ -115,7 +115,7 @@ function ProcessPage({ path, sheet, sheets, busy, progress, message, selectWorkb
       <section className="rounded-[24px] border border-coninco-line bg-white p-7 shadow-soft"><SectionHeading number="01" title="Select contractor workbook" subtitle="The submitted copy is stored inside the application archive."/><button onClick={selectWorkbook} className="group mt-6 flex w-full items-center gap-5 rounded-2xl border-2 border-dashed border-[#dfe1e3] bg-[#fbfbfc] p-6 text-left transition hover:border-coninco-red hover:bg-coninco-soft"><span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-coninco-soft text-coninco-red transition group-hover:scale-105"><CloudUpload size={26}/></span><span className="min-w-0 flex-1"><span className="block text-sm font-black text-coninco-ink">{path ? path.split(/[\\/]/).pop() : "Drop an Excel workbook here"}</span><span className="mt-1 block truncate text-xs text-coninco-muted">{path || "Supports .xlsx and legacy .xls files"}</span></span><span className="rounded-xl bg-coninco-red px-4 py-2.5 text-xs font-black text-white shadow-red">BROWSE</span></button></section>
       <section className="rounded-[24px] border border-coninco-line bg-white p-7 shadow-soft"><SectionHeading number="02" title="Choose worksheet" subtitle="Select the source sheet to audit."/><div className="relative mt-6"><select value={sheet} onChange={(event) => setSheet(event.target.value)} disabled={!sheets.length || busy} className="w-full appearance-none rounded-2xl border border-coninco-line bg-[#fbfbfc] px-4 py-3.5 text-sm font-bold text-coninco-ink outline-none transition focus:border-coninco-red focus:ring-4 focus:ring-coninco-red/10"><option value="">Select a worksheet</option>{sheets.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown className="pointer-events-none absolute right-4 top-4 text-coninco-muted" size={18}/></div><div className="mt-4 flex items-center gap-2 text-[11px] text-coninco-muted"><FileSpreadsheet size={14} className="text-coninco-red"/>{sheets.length ? `${sheets.length} worksheets detected` : "Workbook sheets will appear here"}</div></section>
     </div>
-    <section className="relative overflow-hidden rounded-[24px] border border-coninco-red/20 bg-coninco-soft p-7 shadow-soft"><div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-coninco-red/10 blur-3xl"/><div className="relative flex items-center justify-between"><SectionHeading number="03" title="Run audit" subtitle="Calculate K, S and S-inner, compare source values, then store the result." accent/><button onClick={audit} disabled={!path || !sheet || busy} className="flex items-center gap-3 rounded-2xl bg-coninco-red px-7 py-4 text-sm font-black text-white shadow-red transition hover:bg-coninco-dark disabled:cursor-not-allowed disabled:opacity-40">{busy ? <Loader2 className="animate-spin" size={18}/> : <Play size={18} fill="currentColor"/>}{busy ? "PROCESSING…" : "RUN AUDIT"}</button></div>{busy && <div className="relative mt-6"><div className="mb-2 flex justify-between text-[11px] font-bold text-coninco-muted"><span>{message}</span><span>{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-coninco-red transition-all duration-500" style={{width: `${progress}%`}}/></div></div>}</section>
+    <section className="relative overflow-hidden rounded-[24px] border border-coninco-red/20 bg-coninco-soft p-7 shadow-soft"><div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-coninco-red/10 blur-3xl"/><div className="relative flex items-center justify-between"><SectionHeading number="03" title="Run audit" subtitle="Calculate K, SCN, SCC and STA, compare source values, then store the result." accent/><button onClick={audit} disabled={!path || !sheet || busy} className="flex items-center gap-3 rounded-2xl bg-coninco-red px-7 py-4 text-sm font-black text-white shadow-red transition hover:bg-coninco-dark disabled:cursor-not-allowed disabled:opacity-40">{busy ? <Loader2 className="animate-spin" size={18}/> : <Play size={18} fill="currentColor"/>}{busy ? "PROCESSING…" : "RUN AUDIT"}</button></div>{busy && <div className="relative mt-6"><div className="mb-2 flex justify-between text-[11px] font-bold text-coninco-muted"><span>{message}</span><span>{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-coninco-red transition-all duration-500" style={{width: `${progress}%`}}/></div></div>}</section>
     <div className="flex items-center justify-between rounded-2xl border border-coninco-line bg-white px-6 py-5"><div className="flex items-center gap-3"><History size={18} className="text-coninco-red"/><div><div className="text-sm font-black">Need to review a previous audit?</div><div className="mt-1 text-xs text-coninco-muted">Open the local archive to compare submitted and processed files.</div></div></div><button onClick={() => setPage("archive")} className="flex items-center gap-2 text-xs font-black text-coninco-red hover:text-coninco-dark">OPEN ARCHIVE <ArrowUpRight size={15}/></button></div>
   </div>;
 }
@@ -128,17 +128,22 @@ function ArchivePage({ entries, search, setSearch, viewComparison, removeEntry, 
 
 function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; rows: ComparisonRow[]; back: () => void; setToast: (value: string) => void }) {
   const inputHeaders = ["ROW", "ITEM NO", "DESCRIPTION", "UNIT", "SECTION", "PRODUCT", "W", "H", "W'", "H'", "W''", "H''", "L/M", "R/D", "a", "t", "Q", "PLAN", "UP-DOWN", "VERTICAL AXIS", "FORMULA DETAIL", "ACOUSTIC / FIREPROOF", "NOTE"];
-  const outputHeaders = ["K SOURCE", "K ENGINE", "K CHECK", "S SOURCE", "S ENGINE", "S CHECK", "S INNER SOURCE", "S INNER ENGINE", "S INNER CHECK"];
+  const outputHeaders = ["K SOURCE", "K ENGINE", "K CHECK", "SCN SOURCE", "SCN ENGINE", "SCN CHECK", "SCC SOURCE", "SCC ENGINE", "SCC CHECK", "STA SOURCE", "STA ENGINE", "STA CHECK"];
+  const formulaErrors = rows
+    .map((row) => ({ row, audits: row.formulaAudits.filter((audit) => !audit.matches).sort((left, right) => formulaTargetOrder(left.target) - formulaTargetOrder(right.target)) }))
+    .filter((item) => item.audits.length)
+    .sort((left, right) => left.row.sourceRow - right.row.sourceRow);
 
   return <div className="animate-enter space-y-7">
     <div className="flex items-center gap-4"><button onClick={back} className="rounded-xl border border-coninco-line bg-white p-3 text-coninco-muted hover:border-coninco-red hover:text-coninco-red"><ArrowLeft size={18}/></button><div className="flex-1"><div className="text-[11px] font-black uppercase tracking-[.2em] text-coninco-red">Comparison detail · Sheet {entry.sheet}</div><h1 className="mt-2 text-3xl font-black tracking-tight">{entry.processedName}</h1><p className="mt-2 text-sm text-coninco-muted">One row contains the source inputs and all calculated audit outputs.</p></div><button onClick={() => void openArchiveFile(entry.id, "processed")} className="flex items-center gap-2 rounded-xl border border-coninco-line bg-white px-4 py-3 text-xs font-black text-coninco-red hover:bg-coninco-soft"><FolderOpen size={16}/> OPEN WORKBOOK</button></div>
-    <div className="grid grid-cols-4 gap-4"><Metric label="Rows compared" value={String(entry.rows)} icon={<BarChart3 size={17}/>} /><Metric label="K / S checks" value={String(entry.rows * 3)} icon={<ShieldCheck size={17}/>} /><Metric label="Mismatches" value={String(entry.mismatches)} icon={<Zap size={17}/>} danger={entry.mismatches > 0}/><Metric label="Engine" value="Python" icon={<Settings2 size={17}/>} /></div>
+    <div className="grid grid-cols-4 gap-4"><Metric label="Rows compared" value={String(entry.rows)} icon={<BarChart3 size={17}/>} /><Metric label="K + 3 S checks" value={String(entry.rows * 4)} icon={<ShieldCheck size={17}/>} /><Metric label="Mismatches" value={String(entry.mismatches)} icon={<Zap size={17}/>} danger={entry.mismatches > 0}/><Metric label="Engine" value="Python" icon={<Settings2 size={17}/>} /></div>
+    <FormulaErrorTable items={formulaErrors}/>
     <div className="overflow-hidden rounded-[24px] border border-coninco-line bg-white shadow-soft">
       <div className="border-b border-coninco-line px-6 py-5"><div className="flex items-center gap-2 text-sm font-black"><FileSpreadsheet size={17} className="text-coninco-red"/> Complete comparison table</div><p className="mt-1 text-xs text-coninco-muted">Each row combines contractor inputs, source quantities, engine quantities, and match status. Scroll horizontally to inspect all fields.</p></div>
       <div className="overflow-auto">
         <table className="table-grid min-w-[3600px] border-collapse text-left text-[11px]">
           <thead className="bg-[#fbfbfc] text-[10px] font-black uppercase tracking-wider text-coninco-muted">
-            <tr><th colSpan={inputHeaders.length} className="border-r-2 border-coninco-line bg-coninco-soft px-4 py-3 text-coninco-red">INPUT DATA · SOURCE ROW VALUES</th><th colSpan={outputHeaders.length} className="bg-[#fff4f4] px-4 py-3 text-coninco-red">AUDIT OUTPUT · SOURCE VS ENGINE</th></tr>
+            <tr><th colSpan={inputHeaders.length} className="border-r-2 border-coninco-line bg-coninco-soft px-4 py-3 text-coninco-red">INPUT DATA · SOURCE ROW VALUES</th><th colSpan={outputHeaders.length} className="bg-[#fff4f4] px-4 py-3 text-coninco-red">AUDIT OUTPUT · K / SCN / SCC / STA</th></tr>
             <tr>{inputHeaders.map((label) => <th key={label} className="whitespace-nowrap border-b border-coninco-line px-4 py-4">{label}</th>)}{outputHeaders.map((label) => <th key={label} className="whitespace-nowrap border-b border-l border-coninco-line px-4 py-4">{label}</th>)}</tr>
           </thead>
           <tbody>{rows.map((row) => <tr key={row.sourceRow} className="hover:bg-[#fffafa]">
@@ -146,8 +151,9 @@ function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; 
             {[row.w, row.h, row.w1, row.h1, row.w2, row.h2, row.lm, row.rd, row.a, row.t, row.q].map((value, index) => <td key={`input-number-${index}`} className="px-4 py-4 font-mono">{n(value)}</td>)}
             {[row.plan, row.upDown, row.verticalAxis, row.formulaDetail, row.acousticFireproofDetail, row.note].map((value, index) => <td key={`input-text-${index}`} className="max-w-[240px] px-4 py-4 text-coninco-muted">{value || "—"}</td>)}
             <td className="border-l-2 border-coninco-line px-4 py-4 font-mono">{n(row.contractorK)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedK)}</td><td className="px-4 py-4"><CheckCell match={row.kMatch}/></td>
-            <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorS)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedS)}</td><td className="px-4 py-4"><CheckCell match={row.sMatch}/></td>
-            <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorInnerS)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedInnerS)}</td><td className="px-4 py-4"><CheckCell match={row.innerMatch}/></td>
+            <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorScn)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedScn)}</td><td className="px-4 py-4"><CheckCell match={row.scnMatch}/></td>
+            <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorScc)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedScc)}</td><td className="px-4 py-4"><CheckCell match={row.sccMatch}/></td>
+            <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorSta)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedSta)}</td><td className="px-4 py-4"><CheckCell match={row.staMatch}/></td>
           </tr>)}</tbody>
         </table>
         {!rows.length && <div className="px-6 py-14 text-center text-sm text-coninco-muted">No comparison rows found.</div>}
@@ -155,6 +161,56 @@ function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; 
     </div>
     <div className="flex justify-end"><DownloadButton entry={entry} setToast={setToast}/></div>
   </div>;
+}
+
+const formulaTargetOrder = (target: string) => ({ K: 0, S: 1, S_fireproof: 2, S_inner: 3 }[target] ?? 9);
+
+function FormulaErrorTable({ items }: { items: Array<{ row: ComparisonRow; audits: FormulaAudit[] }> }) {
+  return <section className={`overflow-hidden rounded-[24px] border bg-white shadow-soft ${items.length ? "border-red-200" : "border-emerald-200"}`}>
+    <div className={`flex items-center justify-between border-b px-6 py-5 ${items.length ? "border-red-100 bg-red-50/70" : "border-emerald-100 bg-emerald-50/70"}`}>
+      <div className="flex items-center gap-3"><span className={`rounded-xl p-2.5 ${items.length ? "bg-red-100 text-coninco-red" : "bg-emerald-100 text-emerald-700"}`}><Zap size={17}/></span><div><div className="text-sm font-black">Formula error review</div><p className="mt-1 text-xs text-coninco-muted">Each difference is shown as the original formula first, then the contractor detail formula.</p></div></div>
+      <span className={`rounded-full px-3 py-1.5 text-[10px] font-black ${items.length ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{items.length ? `${items.length} ROWS · ${items.reduce((total, item) => total + item.audits.length, 0)} CHECKS` : "NO DIFFERENCES"}</span>
+    </div>
+    {items.length ? <div className="overflow-auto"><table className="table-grid w-full min-w-[1100px] border-collapse text-left text-[11px]"><thead className="bg-[#fbfbfc] text-[10px] font-black uppercase tracking-wider text-coninco-muted"><tr><th className="px-4 py-3">ROW</th><th className="px-4 py-3">CHECK</th><th className="px-4 py-3">VERSION</th><th className="min-w-[680px] px-4 py-3">FORMULA</th><th className="px-4 py-3 text-right">VALUE</th><th className="px-4 py-3 text-right">DIFFERENCE</th></tr></thead><tbody>{items.map(({ row, audits }) => <FormulaErrorPair key={row.sourceRow} row={row} audits={audits}/>)}</tbody></table></div> : <div className="flex items-center gap-3 px-6 py-6 text-sm font-semibold text-emerald-700"><Check size={17}/> All calculated quantities match the workbook values.</div>}
+  </section>;
+}
+
+function FormulaErrorPair({ row, audits }: { row: ComparisonRow; audits: FormulaAudit[] }) {
+  const originalFormula = audits.map((audit) => `${audit.target}: ${audit.originalFormula || "Original formula not available"}`).join("\n");
+  const detailFormula = audits.map((audit) => audit.detailBlock || `${audit.target}: ${audit.detailFormula || audit.error || "Detail formula not available"}`).join("\n\n");
+  const originalValue = audits.map((audit) => `${audit.target}=${n(audit.originalValue)}`).join(" | ");
+  const calculatedValue = audits.map((audit) => `${audit.target}=${n(audit.calculatedValue)}`).join(" | ");
+  const difference = audits.map((audit) => `${audit.target}=${audit.error ? "ERROR" : n(Math.abs(audit.difference))}`).join(" | ");
+  return <>
+    <tr className="bg-red-50/45">
+      <td rowSpan={2} className="align-top px-4 py-4 font-black text-coninco-red">{row.sourceRow}</td>
+      <td rowSpan={2} className="align-top px-4 py-4"><div className="flex flex-wrap gap-1.5">{audits.map((audit) => <span key={audit.target} className="rounded-full bg-red-100 px-2.5 py-1 text-[10px] font-black text-red-700">{audit.target} · {audit.label}</span>)}</div></td>
+      <td className="px-4 py-3"><span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-[10px] font-black text-[#1565C0]">ORIGINAL</span></td>
+      <td className="px-4 py-3"><FormulaText value={originalFormula} /></td>
+      <td className="px-4 py-3 text-right font-mono font-black text-red-700">{originalValue}</td>
+      <td rowSpan={2} className="align-top px-4 py-4 text-right font-mono font-black text-red-700">{difference}</td>
+    </tr>
+    <tr className="bg-red-50 text-red-800">
+      <td className="px-4 py-3"><span className="rounded-full bg-red-100 px-2.5 py-1 text-[10px] font-black text-red-700">DETAIL</span></td>
+      <td className="px-4 py-3"><FormulaText value={detailFormula} detail /></td>
+      <td className="px-4 py-3 text-right font-mono font-black text-red-700">{calculatedValue}</td>
+    </tr>
+  </>;
+}
+
+function FormulaText({ value, detail = false }: { value: string; detail?: boolean }) {
+  const tokenSource = "(\\$?[A-Z]{1,3}\\$?\\d+|S_V\\d+|W''|H''|W'|H'|W|H|L|M|R|D|a|t|Q|K)\\b";
+  const splitter = new RegExp(tokenSource, "g");
+  const tokenPattern = new RegExp(`^${tokenSource}$`);
+  const parts = value.replace(/\s+/g, " ").trim().split(splitter);
+  const colors = ["#1565C0", "#2E7D32", "#EF6C00", "#6A1B9A", "#00838F"];
+  const colorByToken = new Map<string, string>();
+  const colorFor = (token: string) => {
+    const key = token.replace(/\$/g, "").toUpperCase();
+    if (!colorByToken.has(key)) colorByToken.set(key, colors[colorByToken.size % colors.length]);
+    return colorByToken.get(key);
+  };
+  return <code className={`block whitespace-pre-wrap break-words font-mono text-[11px] leading-5 ${detail ? "font-semibold text-red-800" : "text-coninco-ink"}`}>{parts.map((part, index) => tokenPattern.test(part) ? <span key={`${part}-${index}`} className="font-black" style={{ color: colorFor(part) }}>{part}</span> : part)}</code>;
 }
 
 function Metric({ label, value, icon, danger = false }: { label: string; value: string; icon: React.ReactNode; danger?: boolean }) { return <div className="rounded-2xl border border-coninco-line bg-white p-5 shadow-soft"><div className="flex items-center justify-between text-coninco-muted"><span className="text-[10px] font-black uppercase tracking-wider">{label}</span><span className={danger ? "text-coninco-red" : "text-coninco-red"}>{icon}</span></div><div className={`mt-3 text-2xl font-black ${danger ? "text-coninco-red" : "text-coninco-ink"}`}>{value}</div></div>; }

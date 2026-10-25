@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ArchiveEntry, AuditResult, ComparisonRow } from "../types";
+import type { ArchiveEntry, AuditResult, ComparisonRow, FormulaAudit, FormulaCatalogEntry } from "../types";
 
 const isDesktop = () => Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
@@ -7,18 +7,26 @@ const demoRows: ComparisonRow[] = [
   {
     sourceRow: 21, itemNo: "2465", description: "Fresh air duct 800x400, G.I thk 0.75mm", unit: "m2",
     section: "standard", productType: "rectangular_duct", w: 800, h: 400, w1: 0, h1: 0, w2: 0, h2: 0,
+    inputReferences: { W: "F21", H: "G21", W1: "H21", H1: "I21", W2: "J21", H2: "K21", L_M: "L21", R_D: "M21", a: "N21", t: "O21", Q: "P21", K: "Q21" },
     lm: 0, rd: 0, a: 0, t: 0, q: 9, plan: "0.120 + (2*0.400)", upDown: "", verticalAxis: "",
     formulaDetail: "S=((W+H)*2*K + joint allowance)", acousticFireproofDetail: "", note: "",
-    contractorK: 5.325, calculatedK: 5.325, kMatch: true, contractorS: 15.12, calculatedS: 15.12, sMatch: true,
-    contractorInnerS: 0, calculatedInnerS: 0, innerMatch: true,
+    contractorK: 5.325, calculatedK: 5.325, kMatch: true,
+    contractorScn: 15.12, calculatedScn: 15.12, scnMatch: true,
+    contractorScc: 0, calculatedScc: 0, sccMatch: true,
+    contractorSta: 0, calculatedSta: 0, staMatch: true,
+    formulaAudits: [],
   },
   {
     sourceRow: 24, itemNo: "2468", description: "Square elbow 360x360, G.I sheet thk 0.58mm", unit: "m2",
     section: "standard", productType: "square_elbow", w: 360, h: 360, w1: 350, h1: 350, w2: 0, h2: 0,
+    inputReferences: { W: "F24", H: "G24", W1: "H24", H1: "I24", W2: "J24", H2: "K24", L_M: "L24", R_D: "M24", a: "N24", t: "O24", Q: "P24", K: "Q24" },
     lm: 175, rd: 0, a: 25, t: 0, q: 1, plan: "1.000", upDown: "", verticalAxis: "",
     formulaDetail: "S=(K*(2*((W+50)+(H+50))*L)+...)", acousticFireproofDetail: "", note: "",
-    contractorK: 1, calculatedK: 1, kMatch: true, contractorS: 1.15, calculatedS: 1.15, sMatch: true,
-    contractorInnerS: 0, calculatedInnerS: 0, innerMatch: true,
+    contractorK: 1, calculatedK: 1, kMatch: true,
+    contractorScn: 1.15, calculatedScn: 1.15, scnMatch: true,
+    contractorScc: 0, calculatedScc: 0, sccMatch: true,
+    contractorSta: 0, calculatedSta: 0, staMatch: true,
+    formulaAudits: [],
   },
 ];
 
@@ -30,15 +38,46 @@ const demoArchive: ArchiveEntry[] = [{
 export const chooseWorkbook = () =>
   isDesktop() ? invoke<string | null>("choose_workbook") : Promise.resolve("/demo/L01GF0087.xls");
 
+export const chooseReferenceWorkbook = () =>
+  isDesktop() ? invoke<string | null>("choose_reference_workbook") : Promise.resolve("/demo/formula-reference.xlsx");
+
+export const loadReferenceWorkbook = () =>
+  isDesktop() ? invoke<string | null>("get_reference_workbook") : Promise.resolve("/demo/formula-reference.xlsx");
+
+export const saveReferenceWorkbook = (path: string) =>
+  isDesktop() ? invoke<string>("save_reference_workbook", { path }) : Promise.resolve(path);
+
+export const clearReferenceWorkbook = () =>
+  isDesktop() ? invoke<void>("clear_reference_workbook") : Promise.resolve();
+
 export const listSheets = (path: string) =>
   isDesktop() ? invoke<string[]>("list_sheets", { path }) : Promise.resolve(["02", "COMBINE"]);
 
-export const runAudit = (path: string, sheet: string) =>
+export const listReferenceSheets = (path: string) =>
+  isDesktop() ? invoke<string[]>("list_reference_sheets", { path }) : Promise.resolve(["COMBINE"]);
+
+export const loadFormulaCatalog = (path: string, sheet: string) =>
   isDesktop()
-    ? invoke<AuditResult>("run_audit", { path, sheet })
+    ? invoke<FormulaCatalogEntry[]>("load_reference_catalog", { path, sheet }).then((entries) => entries.map((entry) => ({
+        ...entry,
+        productType: String((entry as FormulaCatalogEntry & { product_type?: string }).product_type ?? entry.productType ?? ""),
+        formulaBlock: String((entry as FormulaCatalogEntry & { formula_block?: string }).formula_block ?? entry.formulaBlock ?? ""),
+        sourceSheet: String((entry as FormulaCatalogEntry & { source_sheet?: string }).source_sheet ?? entry.sourceSheet ?? ""),
+        sourceRow: Number((entry as FormulaCatalogEntry & { source_row?: number }).source_row ?? entry.sourceRow ?? 0),
+      })))
+    : Promise.resolve<FormulaCatalogEntry[]>([]);
+
+export const exportFormulaCatalog = (path: string, sheet: string) =>
+  isDesktop()
+    ? invoke<string | null>("export_formula_catalog", { path, sheet })
+    : Promise.resolve<string | null>("/demo/formula-catalog.json");
+
+export const runAudit = (path: string, sheet: string, referencePath: string, referenceSheet: string) =>
+  isDesktop()
+    ? invoke<AuditResult>("run_audit", { path, sheet, referencePath, referenceSheet })
     : Promise.resolve<AuditResult>({
         id: "demo-1", submittedName: "L01GF0087.xls", processedName: "L01GF0087_calculated.xlsx",
-        sheet, rows: 15, mismatches: 1,
+        sheet, rows: 15, mismatches: 1, referenceFormulas: 63,
       });
 
 export const listArchive = () =>
@@ -46,14 +85,138 @@ export const listArchive = () =>
 
 const number = (value: string | undefined) => Number.parseFloat(value ?? "") || 0;
 const bool = (value: string | undefined) => value === "True" || value === "true";
+const formulaMatchColors = [
+  "#E74C3C", "#8E44AD", "#F39C12", "#2ECC71", "#D81B60", "#795548",
+  "#8A9A0A", "#26A69A", "#F4511E", "#AB47BC", "#7CB342", "#FF7043",
+  "#FDD835", "#A1887F", "#EC407A", "#FFA726", "#66BB6A", "#00ACC1",
+  "#3498DB", "#5C6BC0", "#00BCD4", "#BA68C8", "#AED581", "#C0392B",
+];
+const intermediateBlockColors: Record<string, string> = {
+  S_V1: "#8E44AD", S_V2: "#26A69A", S_V3: "#F39C12", S_V4: "#E74C3C",
+  S_V5: "#3498DB", S_V6: "#2ECC71", S_V7: "#D81B60", S_V8: "#795548",
+  S_V9: "#8A9A0A", S_V10: "#00ACC1", S_V11: "#FDD835", S_V12: "#FF7043",
+};
+const inputReferences = (value: string | undefined, sourceRow: number): Record<string, string> => {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (parsed && typeof parsed === "object") return parsed as Record<string, string>;
+  } catch {
+    // Fall back for previews created before input references were persisted.
+  }
+  return {
+    W: `F${sourceRow}`, H: `G${sourceRow}`, W1: `H${sourceRow}`, H1: `I${sourceRow}`,
+    W2: `J${sourceRow}`, H2: `K${sourceRow}`, L_M: `L${sourceRow}`, R_D: `M${sourceRow}`,
+    a: `N${sourceRow}`, t: `O${sourceRow}`, Q: `P${sourceRow}`, K: `Q${sourceRow}`,
+  };
+};
+const formulaAudits = (value: string | undefined): FormulaAudit[] => {
+  if (!value) return [];
+  try {
+    // Older preview files were read with a manual TSV split. In that case the
+    // JSON field can still contain CSV quotes ("" becomes "). Accept both
+    // formats so archived audits remain readable after the TSV parser fix.
+    const candidates = [value.trim()];
+    const quoted = value.trim();
+    if (quoted.startsWith('"') && quoted.endsWith('"')) {
+      candidates.push(quoted.slice(1, -1).replace(/""/g, '"'));
+    }
+    let parsedValue: unknown;
+    for (const candidate of candidates) {
+      try {
+        parsedValue = JSON.parse(candidate);
+        if (typeof parsedValue === "string") parsedValue = JSON.parse(parsedValue);
+        break;
+      } catch {
+        // Try the next representation.
+      }
+    }
+    if (!Array.isArray(parsedValue)) return [];
+    const parsed = parsedValue as Array<Record<string, unknown>>;
+    let colorCursor = 0;
+    const outputBlockLabels = new Set(["S", "SCN", "SCC", "SCC/TA", "STA"]);
+    const formulaComparison = (value: unknown): FormulaAudit["formulaComparison"] => {
+      if (!value || typeof value !== "object") return undefined;
+      const comparison = value as Record<string, unknown>;
+      const blocks = Array.isArray(comparison.blocks) ? comparison.blocks : [];
+      return {
+        status: String(comparison.status ?? "unverifiable") as NonNullable<FormulaAudit["formulaComparison"]>["status"],
+        originalFormulaValue: comparison.original_formula_value == null && comparison.originalFormulaValue == null ? null : Number(comparison.original_formula_value ?? comparison.originalFormulaValue),
+        detailFormulaValue: comparison.detail_formula_value == null && comparison.detailFormulaValue == null ? null : Number(comparison.detail_formula_value ?? comparison.detailFormulaValue),
+        difference: comparison.difference == null ? null : Number(comparison.difference),
+        error: String(comparison.error ?? ""),
+        blocks: blocks.map((entry) => {
+          const block = entry as Record<string, unknown>;
+          const spans = block.original_spans ?? block.originalSpans;
+          const label = String(block.label ?? "");
+          const isOutputBlock = outputBlockLabels.has(label.toUpperCase());
+          const blockColor = intermediateBlockColors[label.toUpperCase()] ?? formulaMatchColors[colorCursor % formulaMatchColors.length];
+          if (!isOutputBlock) colorCursor += 1;
+          const matchedComponents = Array.isArray(block.matched_components ?? block.matchedComponents)
+            ? ((block.matched_components ?? block.matchedComponents) as Array<Record<string, unknown>>).map((component) => {
+              const mapSpans = (raw: unknown) => Array.isArray(raw) ? raw.map((span) => {
+                const item = span as Record<string, unknown>;
+                return { start: Number(item.start ?? 0), end: Number(item.end ?? 0) };
+              }) : [];
+              const color = formulaMatchColors[colorCursor % formulaMatchColors.length];
+              colorCursor += 1;
+              return {
+                color,
+                originalSpans: mapSpans(component.original_spans ?? component.originalSpans),
+                detailSpans: mapSpans(component.detail_spans ?? component.detailSpans),
+                originalExpression: String(component.original_expression ?? component.originalExpression ?? ""),
+                detailExpression: String(component.detail_expression ?? component.detailExpression ?? ""),
+              };
+            }) : [];
+          return {
+            label: String(block.label ?? ""),
+            expression: String(block.expression ?? ""),
+            value: block.value == null ? null : Number(block.value),
+            status: String(block.status ?? "unmatched") as "matched" | "unmatched",
+            originalExpression: String(block.original_expression ?? block.originalExpression ?? ""),
+            color: isOutputBlock && matchedComponents.length || String(block.status ?? "") === "matched" ? blockColor : "",
+            error: String(block.error ?? ""),
+            originalSpans: Array.isArray(spans) ? spans.map((span) => {
+              const item = span as Record<string, unknown>;
+              return { start: Number(item.start ?? 0), end: Number(item.end ?? 0) };
+            }) : [],
+            matchedComponents: isOutputBlock ? matchedComponents : [],
+          };
+        }),
+      };
+    };
+    return parsed.map((audit) => ({
+      target: String(audit.target ?? ""),
+      label: String(audit.label ?? ""),
+      originalFormula: String(audit.original_formula ?? audit.originalFormula ?? ""),
+      detailFormula: String(audit.detail_formula ?? audit.detailFormula ?? ""),
+      detailBlock: String(audit.detail_block ?? audit.detailBlock ?? audit.detail_formula ?? audit.detailFormula ?? ""),
+      originalValue: Number(audit.original_value ?? audit.originalValue ?? 0),
+      originalFormulaValue: audit.original_formula_value == null ? null : Number(audit.original_formula_value),
+      calculatedValue: Number(audit.calculated_value ?? audit.calculatedValue ?? 0),
+      difference: Number(audit.difference ?? 0),
+      matches: Boolean(audit.matches),
+      error: String(audit.error ?? ""),
+      correction: String(audit.correction ?? ""),
+      referenceFormula: String(audit.reference_formula ?? audit.referenceFormula ?? ""),
+      referenceFormulaBlock: String(audit.reference_formula_block ?? audit.referenceFormulaBlock ?? ""),
+      referenceStatus: String(audit.reference_status ?? audit.referenceStatus ?? "") as FormulaAudit["referenceStatus"],
+      formulaComparison: formulaComparison(audit.formula_comparison ?? audit.formulaComparison),
+    }));
+  } catch {
+    return [];
+  }
+};
 const rowFromPreview = (row: Record<string, string>): ComparisonRow => ({
   sourceRow: Number.parseInt(row.source_row ?? "0", 10), itemNo: row.item_no ?? "", description: row.description ?? "",
   unit: row.unit ?? "", section: row.section ?? "", productType: row.product_type ?? "", w: number(row.w), h: number(row.h),
   w1: number(row.w1), h1: number(row.h1), w2: number(row.w2), h2: number(row.h2), lm: number(row.l_m), rd: number(row.r_d),
-  a: number(row.a), t: number(row.t), q: number(row.q), plan: row.plan ?? "", upDown: row.up_down ?? "", verticalAxis: row.vertical_axis ?? "",
+  a: number(row.a), t: number(row.t), q: number(row.q), inputReferences: inputReferences(row.input_references, Number.parseInt(row.source_row ?? "0", 10)), plan: row.plan ?? "", upDown: row.up_down ?? "", verticalAxis: row.vertical_axis ?? "",
   formulaDetail: row.formula_detail ?? "", acousticFireproofDetail: row.acoustic_fireproof_detail ?? "", note: row.note ?? "",
-  contractorK: number(row.contractor_k), calculatedK: number(row.calculated_k), kMatch: bool(row.k_match), contractorS: number(row.contractor_s),
-  calculatedS: number(row.calculated_s), sMatch: bool(row.s_match), contractorInnerS: number(row.contractor_inner_s), calculatedInnerS: number(row.calculated_inner_s), innerMatch: bool(row.inner_match),
+  contractorK: number(row.contractor_k), calculatedK: number(row.calculated_k), kMatch: bool(row.k_match),
+  contractorScn: number(row.contractor_scn ?? row.contractor_s), calculatedScn: number(row.calculated_scn ?? row.calculated_s), scnMatch: bool(row.scn_match ?? row.s_match),
+  contractorScc: number(row.contractor_scc ?? row.contractor_fireproof_s), calculatedScc: number(row.calculated_scc ?? row.calculated_fireproof_s), sccMatch: bool(row.scc_match ?? row.fireproof_match),
+  contractorSta: number(row.contractor_sta ?? row.contractor_inner_s), calculatedSta: number(row.calculated_sta ?? row.calculated_inner_s), staMatch: bool(row.sta_match ?? row.inner_match),
+  formulaAudits: formulaAudits(row.formula_audits),
 });
 
 export const loadComparison = async (id: string) => {

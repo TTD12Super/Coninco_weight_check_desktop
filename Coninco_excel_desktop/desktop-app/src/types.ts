@@ -38,12 +38,30 @@ export type ComparisonRow = {
   contractorK: number;
   calculatedK: number;
   kMatch: boolean;
-  contractorS: number;
-  calculatedS: number;
-  sMatch: boolean;
-  contractorInnerS: number;
-  calculatedInnerS: number;
-  innerMatch: boolean;
+  contractorScn: number;
+  calculatedScn: number;
+  scnMatch: boolean;
+  contractorScc: number;
+  calculatedScc: number;
+  sccMatch: boolean;
+  contractorSta: number;
+  calculatedSta: number;
+  staMatch: boolean;
+  formulaAudits: FormulaAudit[];
+};
+
+export type FormulaAudit = {
+  target: string;
+  label: string;
+  originalFormula: string;
+  detailFormula: string;
+  detailBlock: string;
+  originalValue: number;
+  calculatedValue: number;
+  difference: number;
+  matches: boolean;
+  error: string;
+  correction: string;
 };
 
 export type AuditResult = {
