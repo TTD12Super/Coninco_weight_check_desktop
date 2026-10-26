@@ -59,6 +59,8 @@ export type ComparisonRow = {
   contractorSta: number;
   calculatedSta: number;
   staMatch: boolean;
+  quantityLayout: "two" | "three";
+  sharedQuantityTarget: "" | "S_fireproof" | "S_inner";
   formulaAudits: FormulaAudit[];
 };
 
@@ -79,20 +81,28 @@ export type FormulaAudit = {
   referenceFormulaBlock?: string;
   referenceStatus?: "equivalent" | "different" | "unverifiable" | "";
   formulaComparison?: FormulaComparison;
+  sourceFormulaComparison?: FormulaComparison;
 };
 
 export type FormulaComparison = {
   status: "equivalent" | "different" | "same_value_structure_diff" | "unverifiable";
+  originalFormula?: string;
   originalFormulaValue?: number | null;
   detailFormulaValue?: number | null;
   difference?: number | null;
   error?: string;
   blocks: Array<{
     label: string;
+    originalLabel?: string;
     expression: string;
     value?: number | null;
     status: "matched" | "unmatched";
     originalExpression: string;
+    astDifferences?: AstDifference[];
+    astOriginalExpression?: string;
+    astStandardExpression?: string;
+    astBlockOriginalExpressions?: string[];
+    astBlockStandardExpressions?: string[];
     color?: string;
     originalSpans?: Array<{ start: number; end: number }>;
     error?: string;
@@ -104,6 +114,14 @@ export type FormulaComparison = {
       detailExpression: string;
     }>;
   }>;
+};
+
+export type AstDifference = {
+  path: string;
+  original: string;
+  standard: string;
+  originalKind?: string;
+  standardKind?: string;
 };
 
 export type AuditResult = {

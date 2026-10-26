@@ -74,6 +74,26 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertNotIn("S_fireproof", output[0]["formula_audits"])
         self.assertAlmostEqual(output[0]["S_inner"], output[0]["S"])
 
+    def test_scc_uses_shared_inner_target_in_two_column_layout(self):
+        data = pd.DataFrame([
+            row_for(
+                "Square elbow 360x360",
+                outer="S=(W+H)*K/1000000",
+                inner="SCC=(W+H)*K/1000000",
+            )
+        ])
+        reference = catalog(
+            entry("square_elbow", "SCN", "(W+H)*K/1000000", "Cách nhiệt", "fireproof"),
+            entry("square_elbow", "SCC", "(W+H)*K/1000000", "Chống cháy", "fireproof"),
+        )
+
+        _calculated, output, errors = calculate_raw_sheet(data, reference_catalog=reference)
+
+        self.assertEqual([], errors)
+        self.assertIn("S_inner", output[0]["formula_audits"])
+        self.assertNotIn("S_fireproof", output[0]["formula_audits"])
+        self.assertAlmostEqual(output[0]["S_inner"], output[0]["S"])
+
     def test_parentheses_only_difference_is_ignored_when_value_matches(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", outer="S=((K*(W+H)))/1000000")

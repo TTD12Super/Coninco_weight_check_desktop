@@ -14,6 +14,8 @@ const demoRows: ComparisonRow[] = [
     contractorScn: 15.12, calculatedScn: 15.12, scnMatch: true,
     contractorScc: 0, calculatedScc: 0, sccMatch: true,
     contractorSta: 0, calculatedSta: 0, staMatch: true,
+    quantityLayout: "two",
+    sharedQuantityTarget: "",
     formulaAudits: [],
   },
   {
@@ -26,6 +28,8 @@ const demoRows: ComparisonRow[] = [
     contractorScn: 1.15, calculatedScn: 1.15, scnMatch: true,
     contractorScc: 0, calculatedScc: 0, sccMatch: true,
     contractorSta: 0, calculatedSta: 0, staMatch: true,
+    quantityLayout: "two",
+    sharedQuantityTarget: "",
     formulaAudits: [],
   },
 ];
@@ -85,17 +89,8 @@ export const listArchive = () =>
 
 const number = (value: string | undefined) => Number.parseFloat(value ?? "") || 0;
 const bool = (value: string | undefined) => value === "True" || value === "true";
-const formulaMatchColors = [
-  "#E74C3C", "#8E44AD", "#F39C12", "#2ECC71", "#D81B60", "#795548",
-  "#8A9A0A", "#26A69A", "#F4511E", "#AB47BC", "#7CB342", "#FF7043",
-  "#FDD835", "#A1887F", "#EC407A", "#FFA726", "#66BB6A", "#00ACC1",
-  "#3498DB", "#5C6BC0", "#00BCD4", "#BA68C8", "#AED581", "#C0392B",
-];
-const intermediateBlockColors: Record<string, string> = {
-  S_V1: "#8E44AD", S_V2: "#26A69A", S_V3: "#F39C12", S_V4: "#E74C3C",
-  S_V5: "#3498DB", S_V6: "#2ECC71", S_V7: "#D81B60", S_V8: "#795548",
-  S_V9: "#8A9A0A", S_V10: "#00ACC1", S_V11: "#FDD835", S_V12: "#FF7043",
-};
+const formulaMatchBlue = "#1565C0";
+const formulaMismatchRed = "#B91C1C";
 const inputReferences = (value: string | undefined, sourceRow: number): Record<string, string> => {
   try {
     const parsed = JSON.parse(value || "{}");
@@ -132,14 +127,13 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
     }
     if (!Array.isArray(parsedValue)) return [];
     const parsed = parsedValue as Array<Record<string, unknown>>;
-    let colorCursor = 0;
-    const outputBlockLabels = new Set(["S", "SCN", "SCC", "SCC/TA", "STA"]);
     const formulaComparison = (value: unknown): FormulaAudit["formulaComparison"] => {
       if (!value || typeof value !== "object") return undefined;
       const comparison = value as Record<string, unknown>;
       const blocks = Array.isArray(comparison.blocks) ? comparison.blocks : [];
       return {
         status: String(comparison.status ?? "unverifiable") as NonNullable<FormulaAudit["formulaComparison"]>["status"],
+        originalFormula: String(comparison.original_formula ?? comparison.originalFormula ?? ""),
         originalFormulaValue: comparison.original_formula_value == null && comparison.originalFormulaValue == null ? null : Number(comparison.original_formula_value ?? comparison.originalFormulaValue),
         detailFormulaValue: comparison.detail_formula_value == null && comparison.detailFormulaValue == null ? null : Number(comparison.detail_formula_value ?? comparison.detailFormulaValue),
         difference: comparison.difference == null ? null : Number(comparison.difference),
@@ -148,19 +142,16 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
           const block = entry as Record<string, unknown>;
           const spans = block.original_spans ?? block.originalSpans;
           const label = String(block.label ?? "");
-          const isOutputBlock = outputBlockLabels.has(label.toUpperCase());
-          const blockColor = intermediateBlockColors[label.toUpperCase()] ?? formulaMatchColors[colorCursor % formulaMatchColors.length];
-          if (!isOutputBlock) colorCursor += 1;
+          const status = String(block.status ?? "unmatched") as "matched" | "unmatched";
+          const blockColor = status === "matched" ? formulaMatchBlue : formulaMismatchRed;
           const matchedComponents = Array.isArray(block.matched_components ?? block.matchedComponents)
             ? ((block.matched_components ?? block.matchedComponents) as Array<Record<string, unknown>>).map((component) => {
               const mapSpans = (raw: unknown) => Array.isArray(raw) ? raw.map((span) => {
                 const item = span as Record<string, unknown>;
                 return { start: Number(item.start ?? 0), end: Number(item.end ?? 0) };
               }) : [];
-              const color = formulaMatchColors[colorCursor % formulaMatchColors.length];
-              colorCursor += 1;
               return {
-                color,
+                color: blockColor,
                 originalSpans: mapSpans(component.original_spans ?? component.originalSpans),
                 detailSpans: mapSpans(component.detail_spans ?? component.detailSpans),
                 originalExpression: String(component.original_expression ?? component.originalExpression ?? ""),
@@ -169,17 +160,35 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
             }) : [];
           return {
             label: String(block.label ?? ""),
+            originalLabel: String(block.original_label ?? block.originalLabel ?? block.label ?? ""),
             expression: String(block.expression ?? ""),
             value: block.value == null ? null : Number(block.value),
-            status: String(block.status ?? "unmatched") as "matched" | "unmatched",
+            status,
             originalExpression: String(block.original_expression ?? block.originalExpression ?? ""),
-            color: isOutputBlock && matchedComponents.length || String(block.status ?? "") === "matched" ? blockColor : "",
+            astOriginalExpression: String(block.ast_original_expression ?? block.astOriginalExpression ?? ""),
+            astStandardExpression: String(block.ast_standard_expression ?? block.astStandardExpression ?? ""),
+            astBlockOriginalExpressions: Array.isArray(block.ast_block_original_expressions ?? block.astBlockOriginalExpressions)
+              ? ((block.ast_block_original_expressions ?? block.astBlockOriginalExpressions) as unknown[]).map(String)
+              : [],
+            astBlockStandardExpressions: Array.isArray(block.ast_block_standard_expressions ?? block.astBlockStandardExpressions)
+              ? ((block.ast_block_standard_expressions ?? block.astBlockStandardExpressions) as unknown[]).map(String)
+              : [],
+            astDifferences: Array.isArray(block.ast_differences ?? block.astDifferences)
+              ? ((block.ast_differences ?? block.astDifferences) as Array<Record<string, unknown>>).map((difference) => ({
+                path: String(difference.path ?? ""),
+                original: String(difference.original ?? ""),
+                standard: String(difference.standard ?? ""),
+                originalKind: String(difference.original_kind ?? difference.originalKind ?? ""),
+                standardKind: String(difference.standard_kind ?? difference.standardKind ?? ""),
+              }))
+              : [],
+            color: blockColor,
             error: String(block.error ?? ""),
             originalSpans: Array.isArray(spans) ? spans.map((span) => {
               const item = span as Record<string, unknown>;
               return { start: Number(item.start ?? 0), end: Number(item.end ?? 0) };
             }) : [],
-            matchedComponents: isOutputBlock ? matchedComponents : [],
+            matchedComponents,
           };
         }),
       };
@@ -201,6 +210,7 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
       referenceFormulaBlock: String(audit.reference_formula_block ?? audit.referenceFormulaBlock ?? ""),
       referenceStatus: String(audit.reference_status ?? audit.referenceStatus ?? "") as FormulaAudit["referenceStatus"],
       formulaComparison: formulaComparison(audit.formula_comparison ?? audit.formulaComparison),
+      sourceFormulaComparison: formulaComparison(audit.source_formula_comparison ?? audit.sourceFormulaComparison),
     }));
   } catch {
     return [];
@@ -216,6 +226,8 @@ const rowFromPreview = (row: Record<string, string>): ComparisonRow => ({
   contractorScn: number(row.contractor_scn ?? row.contractor_s), calculatedScn: number(row.calculated_scn ?? row.calculated_s), scnMatch: bool(row.scn_match ?? row.s_match),
   contractorScc: number(row.contractor_scc ?? row.contractor_fireproof_s), calculatedScc: number(row.calculated_scc ?? row.calculated_fireproof_s), sccMatch: bool(row.scc_match ?? row.fireproof_match),
   contractorSta: number(row.contractor_sta ?? row.contractor_inner_s), calculatedSta: number(row.calculated_sta ?? row.calculated_inner_s), staMatch: bool(row.sta_match ?? row.inner_match),
+  quantityLayout: row.quantity_layout === "three" ? "three" : "two",
+  sharedQuantityTarget: row.shared_target === "S_fireproof" || row.shared_target === "S_inner" ? row.shared_target : "",
   formulaAudits: formulaAudits(row.formula_audits),
 });
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import math
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Mapping
 
 import pandas as pd
@@ -292,6 +293,7 @@ class _Parser:
         raise FormulaParseError(f"Unexpected token {token.value!r} at {token.position}.")
 
 
+@lru_cache(maxsize=4096)
 def parse_formula(expression: str) -> Node:
     """Parse one expression without its optional ``S=`` label."""
     text = str(expression).strip()
@@ -494,6 +496,7 @@ def render_excel(
     return _render_excel_node(node, references)
 
 
+@lru_cache(maxsize=16384)
 def canonical(node: Node) -> Any:
     """Return a stable representation for commutative + and * blocks."""
     if node.kind in ("number", "name", "cell"):

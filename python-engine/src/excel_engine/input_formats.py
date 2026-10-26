@@ -125,7 +125,70 @@ def detect_source_columns(data: pd.DataFrame) -> dict[str, int]:
     set_first("insulation_quantity", lambda text: "khoi luong cach nhiet m2" in text and "trong" not in text)
     set_first("fireproof_quantity", lambda text: "khoi luong chong chay" in text)
     set_first("acoustic_quantity", lambda text: "khoi luong cach nhiet trong" in text)
+
+    # Some workbooks use the target labels directly instead of descriptive
+    # headers. Keep SCN, SCC and STA separate when those columns exist.
+    set_first(
+        "scn_quantity",
+        lambda text: text in {"scn", "s c n"}
+        or (
+            re.search(r"(^| )scn($| )", text) is not None
+            and ("m2" in text or "quantity" in text)
+        ),
+    )
+    set_first(
+        "scc_quantity",
+        lambda text: (
+            (
+                text in {"scc", "s c c"}
+                or (
+                    re.search(r"(^| )scc($| )", text) is not None
+                    and ("m2" in text or "quantity" in text)
+                )
+            )
+            and "ta" not in text
+        ),
+    )
+    set_first(
+        "sta_quantity",
+        lambda text: text in {"sta", "s t a", "scc ta", "scc t a"}
+        or (
+            re.search(r"(^| )sta($| )", text) is not None
+            and ("m2" in text or "quantity" in text)
+        )
+        or (
+            "scc" in text
+            and "ta" in text
+            and ("m2" in text or "quantity" in text)
+        ),
+    )
+
+    # The reference template uses descriptive headers. Expose the same
+    # semantic targets without changing the legacy two-quantity layout.
+    if "scn_quantity" not in columns and "insulation_quantity" in columns:
+        columns["scn_quantity"] = columns["insulation_quantity"]
+    if "scc_quantity" not in columns and "fireproof_quantity" in columns:
+        columns["scc_quantity"] = columns["fireproof_quantity"]
+    if "sta_quantity" not in columns and "acoustic_quantity" in columns:
+        columns["sta_quantity"] = columns["acoustic_quantity"]
     return columns
+
+
+def quantity_column_for_target(columns: dict[str, int], target: str) -> str | None:
+    """Return the source quantity field for S/SCN/SCC/STA/SCC-TA."""
+    target_key = target.upper().replace(" ", "")
+    if target_key in {"S", "SCN"}:
+        return "scn_quantity" if "scn_quantity" in columns else "insulation_quantity"
+    if target_key == "SCC":
+        if "scc_quantity" in columns:
+            return "scc_quantity"
+        if "fireproof_quantity" in columns:
+            return "fireproof_quantity"
+        # Legacy files store SCC together with the inside quantity.
+        return "acoustic_quantity"
+    if target_key in {"STA", "SCC/TA", "SCCTA"}:
+        return "sta_quantity" if "sta_quantity" in columns else "acoustic_quantity"
+    return None
 
 PRODUCT_INPUT_FORMATS = {
     "rectangular_duct": ("W", "H", "K"),
@@ -147,4 +210,5 @@ __all__ = [
     "PRODUCT_INPUT_FORMATS",
     "DEFAULT_SOURCE_COLUMNS",
     "detect_source_columns",
+    "quantity_column_for_target",
 ]

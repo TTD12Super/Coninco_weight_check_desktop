@@ -291,14 +291,17 @@ function ArchivePage({ entries, search, setSearch, viewComparison, removeEntry, 
 
 function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; rows: ComparisonRow[]; back: () => void; setToast: (value: string) => void }) {
   const inputHeaders = ["ROW", "ITEM NO", "PRODUCT NAME", "UNIT", "SECTION", "PRODUCT TYPE", "W", "H", "W'", "H'", "W''", "H''", "L/M", "R/D", "a", "t", "Q", "PLAN", "UP-DOWN", "VERTICAL AXIS", "FORMULA DETAIL", "ACOUSTIC / FIREPROOF", "NOTE"];
-  const outputHeaders = ["K SOURCE", "K ENGINE", "K CHECK", "S SOURCE", "S ENGINE", "S CHECK", "SCC/STA SOURCE", "SCC/STA ENGINE", "SCC/STA CHECK"];
+  const hasSeparateFireproofAndAcoustic = rows.some((row) => row.quantityLayout === "three");
+  const outputHeaders = hasSeparateFireproofAndAcoustic
+    ? ["K SOURCE", "K ENGINE", "K CHECK", "SCN SOURCE", "SCN ENGINE", "SCN CHECK", "SCC SOURCE", "SCC ENGINE", "SCC CHECK", "STA SOURCE", "STA ENGINE", "STA CHECK"]
+    : ["K SOURCE", "K ENGINE", "K CHECK", "S SOURCE", "S ENGINE", "S CHECK", "SCC/TA SOURCE", "SCC/TA ENGINE", "SCC/TA CHECK"];
   const formulaErrors = rows
     .flatMap((row) => mismatchedFormulaAudits(row).map((audit) => ({ row, audit })))
     .sort((left, right) => left.row.sourceRow - right.row.sourceRow || formulaTargetOrder(left.audit.target) - formulaTargetOrder(right.audit.target));
 
   return <div className="animate-enter space-y-7">
     <div className="flex items-center gap-4"><button onClick={back} className="rounded-xl border border-coninco-line bg-white p-3 text-coninco-muted hover:border-coninco-red hover:text-coninco-red"><ArrowLeft size={18}/></button><div className="flex-1"><div className="text-[11px] font-black uppercase tracking-[.2em] text-coninco-red">Comparison detail · Sheet {entry.sheet}</div><h1 className="mt-2 text-3xl font-black tracking-tight">{entry.processedName}</h1><p className="mt-2 text-sm text-coninco-muted">One row contains the source inputs and all calculated audit outputs.</p></div><button onClick={() => void openArchiveFile(entry.id, "processed")} className="flex items-center gap-2 rounded-xl border border-coninco-line bg-white px-4 py-3 text-xs font-black text-coninco-red hover:bg-coninco-soft"><FolderOpen size={16}/> OPEN WORKBOOK</button></div>
-    <div className="grid grid-cols-4 gap-4"><Metric label="Rows compared" value={String(entry.rows)} icon={<BarChart3 size={17}/>} /><Metric label="K + S + SCC/TA" value={String(entry.rows * 3)} icon={<ShieldCheck size={17}/>} /><Metric label="Mismatches" value={String(entry.mismatches)} icon={<Zap size={17}/>} danger={entry.mismatches > 0}/><Metric label="Engine" value="Python" icon={<Settings2 size={17}/>} /></div>
+    <div className="grid grid-cols-4 gap-4"><Metric label="Rows compared" value={String(entry.rows)} icon={<BarChart3 size={17}/>} /><Metric label={hasSeparateFireproofAndAcoustic ? "K + SCN + SCC + STA" : "K + S + SCC/TA"} value={String(entry.rows * (hasSeparateFireproofAndAcoustic ? 4 : 3))} icon={<ShieldCheck size={17}/>} /><Metric label="Mismatches" value={String(entry.mismatches)} icon={<Zap size={17}/>} danger={entry.mismatches > 0}/><Metric label="Engine" value="Python" icon={<Settings2 size={17}/>} /></div>
     <FormulaErrorTable items={formulaErrors}/>
     <div className="overflow-hidden rounded-[24px] border border-coninco-line bg-white shadow-soft">
       <div className="border-b border-coninco-line px-6 py-5"><div className="flex items-center gap-2 text-sm font-black"><FileSpreadsheet size={17} className="text-coninco-red"/> Complete comparison table</div><p className="mt-1 text-xs text-coninco-muted">Each row combines contractor inputs, source quantities, engine quantities, and match status. Scroll horizontally to inspect all fields.</p></div>
@@ -315,6 +318,7 @@ function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; 
             <td className="border-l-2 border-coninco-line px-4 py-4 font-mono">{n(row.contractorK)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedK)}</td><td className="px-4 py-4"><CheckCell match={row.kMatch}/></td>
             <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorScn)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedScn)}</td><td className="px-4 py-4"><CheckCell match={row.scnMatch}/></td>
             <td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorScc)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedScc)}</td><td className="px-4 py-4"><CheckCell match={row.sccMatch}/></td>
+            {hasSeparateFireproofAndAcoustic && <><td className="border-l border-coninco-line px-4 py-4 font-mono">{n(row.contractorSta)}</td><td className="px-4 py-4 font-mono">{n(row.calculatedSta)}</td><td className="px-4 py-4"><CheckCell match={row.staMatch}/></td></>}
           </tr>)}</tbody>
         </table>
         {!rows.length && <div className="px-6 py-14 text-center text-sm text-coninco-muted">No comparison rows found.</div>}
@@ -325,7 +329,7 @@ function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; 
 }
 
 const formulaTargetOrder = (target: string) => ({ K: 0, S: 1, S_fireproof: 2, S_inner: 2 }[target] ?? 9);
-const formulaTargetLabel = (target: string) => ({ K: "K", S: "S / SCN", S_fireproof: "SCC/STA", S_inner: "SCC/STA" }[target] ?? target.toUpperCase());
+const formulaTargetLabel = (target: string) => ({ K: "K", S: "S / SCN", S_fireproof: "SCC", S_inner: "STA / SCC-TA" }[target] ?? target.toUpperCase());
 
 function mismatchedFormulaAudits(row: ComparisonRow): FormulaAudit[] {
   const audits = new Map(row.formulaAudits.map((audit) => [audit.target, audit]));
@@ -346,10 +350,12 @@ function mismatchedFormulaAudits(row: ComparisonRow): FormulaAudit[] {
   const specs: Array<[string, string, number, number, string]> = [
     ["K", "K", row.contractorK, row.calculatedK, `K = PLAN + UP-DOWN + VERTICAL AXIS = ${n(row.calculatedK)}`],
     ["S", "S / SCN", row.contractorScn, row.calculatedScn, row.formulaDetail],
-    ["S_inner", "SCC / STA / SCC-TA", row.contractorScc, row.calculatedScc, row.acousticFireproofDetail || row.formulaDetail],
+    ["S_fireproof", "SCC", row.contractorScc, row.calculatedScc, row.acousticFireproofDetail || row.formulaDetail],
+    ["S_inner", "STA / SCC-TA", row.contractorSta, row.calculatedSta, row.acousticFireproofDetail || row.formulaDetail],
   ];
   for (const [target, label, originalValue, calculatedValue, detail] of specs) {
-    const match = target === "K" ? row.kMatch : target === "S" ? row.scnMatch : row.sccMatch;
+    if (row.sharedQuantityTarget && target !== row.sharedQuantityTarget && target !== "K" && target !== "S") continue;
+    const match = target === "K" ? row.kMatch : target === "S" ? row.scnMatch : target === "S_fireproof" ? row.sccMatch : row.staMatch;
     if (!match && !audits.has(target)) audits.set(target, fallback(target, label, originalValue, calculatedValue, detail));
   }
   return [...audits.values()]
@@ -363,31 +369,42 @@ function FormulaErrorTable({ items }: { items: Array<{ row: ComparisonRow; audit
       <div className="flex items-center gap-3"><span className={`rounded-xl p-2.5 ${items.length ? "bg-red-100 text-coninco-red" : "bg-emerald-100 text-emerald-700"}`}><Zap size={17}/></span><div><div className="text-sm font-black">Formula error review</div><p className="mt-1 text-xs text-coninco-muted">Formula structure is checked only when the saved result differs.</p></div></div>
       <span className={`rounded-full px-3 py-1.5 text-[10px] font-black ${items.length ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{items.length ? `${items.length} FORMULA CHECKS` : "NO DIFFERENCES"}</span>
     </div>
-    {items.length ? <div className="overflow-auto"><table className="table-grid w-full min-w-[1450px] border-collapse text-left text-[11px]"><thead className="bg-[#fbfbfc] text-[10px] font-black uppercase tracking-wider text-coninco-muted"><tr><th className="px-4 py-3">ROW</th><th className="min-w-[320px] px-4 py-3">PRODUCT NAME / TYPE</th><th className="px-4 py-3">CHECK</th><th className="px-4 py-3">VERSION</th><th className="min-w-[680px] px-4 py-3">FORMULA</th><th className="px-4 py-3 text-right">VALUE</th><th className="px-4 py-3 text-right">DIFFERENCE</th></tr></thead><tbody>{items.map(({ row, audit }) => <FormulaErrorPair key={`${row.sourceRow}-${audit.target}`} row={row} audit={audit}/>)}</tbody></table></div> : <div className="flex items-center gap-3 px-6 py-6 text-sm font-semibold text-emerald-700"><Check size={17}/> All calculated quantities match the workbook values. Formula text was not checked for matching results.</div>}
+    {items.length ? <div className="overflow-auto"><table className="table-grid w-full min-w-[3100px] border-collapse text-left text-[11px]"><thead className="bg-[#fbfbfc] text-[10px] font-black uppercase tracking-wider text-coninco-muted"><tr><th className="px-4 py-3">ROW</th><th className="min-w-[320px] px-4 py-3">PRODUCT NAME / TYPE</th><th className="px-4 py-3">CHECK</th><th className="px-4 py-3">VERSION</th><th className="min-w-[680px] px-4 py-3">FORMULA</th><th className="min-w-[1600px] px-4 py-3">AST FORMULA DIFFERENCE</th><th className="px-4 py-3 text-right">VALUE</th><th className="px-4 py-3 text-right">DIFFERENCE</th></tr></thead><tbody>{items.map(({ row, audit }) => <FormulaErrorPair key={`${row.sourceRow}-${audit.target}`} row={row} audit={audit}/>)}</tbody></table></div> : <div className="flex items-center gap-3 px-6 py-6 text-sm font-semibold text-emerald-700"><Check size={17}/> All calculated quantities match the workbook values. Formula text was not checked for matching results.</div>}
   </section>;
 }
 
 function FormulaErrorPair({ row, audit }: { row: ComparisonRow; audit: FormulaAudit }) {
-  const label = formulaTargetLabel(audit.target);
-  const statusLabel = (audit: FormulaAudit) => {
-    if (audit.referenceStatus === "different") return "STANDARD FORMULA DIFFERS";
-    if (audit.referenceStatus === "unverifiable") return "STANDARD FORMULA UNVERIFIED";
-    const status = audit.formulaComparison?.status ?? "unverifiable";
-    return status === "equivalent" ? "STRUCTURE MATCH"
-      : status === "different" ? "FORMULAS DIFFER"
-      : status === "same_value_structure_diff" ? "SAME VALUE HERE · STRUCTURE DIFF"
-      : "CANNOT COMPARE";
-  };
-  const statusTone = (audit: FormulaAudit): "good" | "bad" | "warning" => {
-    if (audit.referenceStatus === "different") return "bad";
-    if (audit.referenceStatus === "unverifiable") return "bad";
-    const status = audit.formulaComparison?.status;
-    return status === "equivalent" ? "good" : status === "different" ? "bad" : "warning";
-  };
-  const originalValue = `Saved=${n(audit.originalValue)} · formula=${audit.originalFormulaValue == null ? "not calculated" : n(audit.originalFormulaValue)}`;
+  const label = audit.label || formulaTargetLabel(audit.target);
+  const sourceComparison = audit.sourceFormulaComparison ?? audit.formulaComparison;
+  const sourceStatus = new Map((sourceComparison?.blocks ?? []).map((block) => [block.label.toUpperCase(), block.status]));
+  const blocks = [...(audit.formulaComparison?.blocks ?? sourceComparison?.blocks ?? [])]
+    .map((block) => ({
+      ...block,
+      status: block.status === "unmatched"
+        || (sourceStatus.get(block.label.toUpperCase()) === "unmatched" && (block.astDifferences ?? []).length > 0)
+        ? "unmatched" as const
+        : "matched" as const,
+      color: block.status === "unmatched"
+        || (sourceStatus.get(block.label.toUpperCase()) === "unmatched" && (block.astDifferences ?? []).length > 0)
+        ? "#B91C1C"
+        : "#1565C0",
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }));
+  const originalFormulaValue = sourceComparison?.originalFormulaValue ?? audit.originalFormulaValue;
   const calculatedValue = n(audit.calculatedValue);
-  const formulaDifference = audit.formulaComparison?.difference;
-  const difference = `Saved Δ=${audit.error ? "ERROR" : n(Math.abs(audit.difference))} · formula Δ=${formulaDifference == null ? "—" : n(Math.abs(formulaDifference))}`;
+  const formulaDelta = originalFormulaValue == null ? null : Math.abs(originalFormulaValue - audit.calculatedValue);
+  const savedDelta = Math.abs(audit.difference);
+  const valuesExplainCache = formulaDelta !== null && formulaDelta <= 0.0005 && savedDelta > 0.0005;
+  const originalValue = <div className="space-y-1 text-right">
+    <div>SAVED CELL = {n(audit.originalValue)}</div>
+    <div>ORIGINAL FORMULA = {originalFormulaValue == null ? "—" : n(originalFormulaValue)}</div>
+  </div>;
+  const standardValue = <div className="space-y-1 text-right">STANDARD FORMULA = {calculatedValue}</div>;
+  const difference = <div className="space-y-1 text-right">
+    <div>SAVED vs STANDARD Δ={audit.error ? "ERROR" : n(savedDelta)}</div>
+    <div>ORIGINAL FORMULA vs STANDARD Δ={formulaDelta == null ? "—" : n(formulaDelta)}</div>
+    {valuesExplainCache && <div className="max-w-[220px] whitespace-normal text-[9px] font-bold text-coninco-muted">Formula results match; the saved Excel value is different.</div>}
+  </div>;
   const inputReferenceEntries = Object.entries(row.inputReferences);
   return <>
     <tr className="bg-red-50/45">
@@ -397,93 +414,132 @@ function FormulaErrorPair({ row, audit }: { row: ComparisonRow; audit: FormulaAu
         <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-coninco-muted">{row.productType || "—"}</div>
       </td>
       <td rowSpan={2} className="align-top px-4 py-4"><span className="rounded-full bg-red-100 px-2.5 py-1 text-[10px] font-black text-red-700">{label}</span></td>
-      <td className="px-4 py-3"><div className="space-y-2"><span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-[10px] font-black text-[#1565C0]">ORIGINAL</span><StatusBadge label={statusLabel(audit)} tone={statusTone(audit)} /></div></td>
-      <td className="px-4 py-3"><div className="min-w-max space-y-2">{(() => {
-        const prefix = `${label}: `;
-        const highlights = (audit.formulaComparison?.blocks ?? []).flatMap((block) =>
-          block.matchedComponents?.length
-            ? block.matchedComponents.flatMap((component) => component.originalSpans.map((span) => ({ ...span, start: span.start + prefix.length, end: span.end + prefix.length, color: component.color })))
-            : block.color ? block.originalSpans?.map((span) => ({ ...span, start: span.start + prefix.length, end: span.end + prefix.length, color: block.color! })) ?? [] : [],
-        );
-        return <FormulaText value={`${prefix}${audit.originalFormula || "Original formula not available"}`} tone={statusTone(audit)} highlights={highlights} />;
-      })()}</div></td>
+      <td className="px-4 py-3"><span className="rounded-full bg-[#eef4ff] px-2.5 py-1 text-[10px] font-black text-[#1565C0]">ORIGINAL</span></td>
+      <td className="px-4 py-3"><OriginalFormulaText value={sourceComparison?.originalFormula || audit.originalFormula || "Original formula not available"} comparison={sourceComparison} /></td>
+      <td rowSpan={2} className="align-top px-4 py-4"><AstDifferenceList blocks={blocks} originalFormula={sourceComparison?.originalFormula || audit.originalFormula || ""} /></td>
       <td className="px-4 py-3 text-right font-mono text-[10px] font-bold text-coninco-ink">{originalValue}</td>
       <td rowSpan={2} className="align-top px-4 py-4 text-right font-mono text-[10px] font-black text-red-700">{difference}</td>
     </tr>
     <tr className="bg-white">
-      <td className="px-4 py-3"><span className="rounded-full bg-[#f1f2f3] px-2.5 py-1 text-[10px] font-black text-coninco-muted">DETAIL</span></td>
+      <td className="px-4 py-3"><span className="rounded-full bg-[#f1f2f3] px-2.5 py-1 text-[10px] font-black text-coninco-muted">STANDARD</span></td>
       <td className="px-4 py-3"><div className="min-w-max space-y-3">
-        <div className="flex flex-wrap items-center gap-1.5 pl-4 text-[10px] font-black uppercase tracking-wide text-coninco-muted">
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-coninco-muted">
           <span className="mr-1 text-coninco-red">INPUT CELLS</span>
           {inputReferenceEntries.map(([name, address]) => <span key={`${name}-${address}`} className="rounded-md bg-[#f1f2f3] px-1.5 py-1 font-mono normal-case tracking-normal text-coninco-ink">{name}: {address}</span>)}
         </div>
-        <div className="space-y-1.5">
-          {audit.formulaComparison?.blocks.length ? audit.formulaComparison.blocks.map((block, index) => {
-            const isOutput = block.label.toUpperCase() === audit.label.toUpperCase();
-            const tone = isOutput ? statusTone(audit) : block.status === "matched" ? "good" : "bad";
-            return <div key={`${audit.target}-${block.label}-${index}`} className="space-y-0.5">
-              <FormulaText
-                value={`${block.label} = ${block.expression}`}
-                tone={tone}
-                highlightColor={block.matchedComponents?.length ? undefined : block.color}
-                highlights={block.matchedComponents?.flatMap((component) => component.detailSpans.map((span) => ({ ...span, start: span.start + block.label.length + 3, end: span.end + block.label.length + 3, color: component.color })) ?? []) ?? []}
-              />
-              {block.error && <div className="whitespace-nowrap pl-4 text-[10px] font-semibold text-red-700">This formula block has a syntax error; other blocks are still compared. {block.error}</div>}
-            </div>;
-          }) : <div className="space-y-1"><FormulaText value={audit.detailBlock || audit.detailFormula || audit.error || "Detail formula not available"} tone={statusTone(audit)} /><div className="whitespace-nowrap pl-4 text-[10px] font-semibold text-red-700">This block is different or cannot be verified against the standard formula.</div></div>}
-        </div>
-        {audit.referenceFormula && <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-          <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-amber-800">STANDARD FORMULA · {audit.referenceStatus === "equivalent" ? "MATCHED" : audit.referenceStatus === "different" ? "DIFFERENT" : "UNVERIFIED"}</div>
-          <FormulaText value={audit.referenceFormulaBlock || `${audit.label || label}: ${audit.referenceFormula}`} tone={audit.referenceStatus === "equivalent" ? "good" : "bad"} />
-        </div>}
+        <FormulaBlockList
+          blocks={blocks}
+          fallback={audit.referenceFormulaBlock
+            || (audit.referenceFormula ? `${audit.label || label}: ${audit.referenceFormula}` : "")
+            || audit.detailBlock
+            || audit.detailFormula
+            || row.acousticFireproofDetail
+            || row.formulaDetail
+            || audit.error}
+        />
       </div></td>
-      <td className="px-4 py-3 text-right font-mono text-[10px] font-bold text-coninco-ink">{calculatedValue}</td>
+      <td className="px-4 py-3 text-right font-mono text-[10px] font-bold text-coninco-ink">{standardValue}</td>
     </tr>
   </>;
 }
 
-function StatusBadge({ label, tone }: { label: string; tone: "good" | "bad" | "warning" }) {
-  const classes = tone === "good" ? "bg-emerald-100 text-emerald-700"
-    : tone === "bad" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800";
-  return <span className={`block w-fit rounded-full px-2.5 py-1 text-[9px] font-black ${classes}`}>{label}</span>;
+type FormulaComparisonBlock = NonNullable<FormulaAudit["formulaComparison"]>["blocks"][number];
+
+function OriginalFormulaText({ value, comparison }: { value: string; comparison?: FormulaAudit["sourceFormulaComparison"] }) {
+  const spans = (comparison?.blocks ?? [])
+    .flatMap((block) => (block.originalSpans ?? []).map((span) => ({
+      ...span,
+      color: block.status === "matched" ? "#1565C0" : "#B91C1C",
+    })))
+    .sort((left, right) => left.start - right.start || right.end - left.end);
+  const baseColor = spans.length || comparison?.status === "equivalent" ? "#1565C0" : "#B91C1C";
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach((span, index) => {
+    const start = Math.max(cursor, span.start);
+    const end = Math.max(start, span.end);
+    if (start > cursor) parts.push(<span key={`original-gap-${index}`} style={{ color: baseColor }}>{value.slice(cursor, start)}</span>);
+    if (end > start) parts.push(<span key={`original-block-${index}`} style={{ color: span.color, fontWeight: 900 }}>{value.slice(start, end)}</span>);
+    cursor = Math.max(cursor, end);
+  });
+  if (cursor < value.length) parts.push(<span key="original-tail" style={{ color: baseColor }}>{value.slice(cursor)}</span>);
+  return <div className="min-w-max space-y-1.5 font-mono text-[11px] leading-5">
+    <div className="whitespace-nowrap rounded-lg border-l-4 bg-white px-3 py-2" style={{ borderLeftColor: baseColor }}>
+      {spans.length ? parts : <span style={{ color: baseColor, fontWeight: 900 }}>{value}</span>}
+    </div>
+  </div>;
 }
 
-function FormulaText({ value, tone = "bad", highlightColor, highlights = [] }: { value: string; tone?: "bad" | "good" | "warning"; highlightColor?: string; highlights?: Array<{ start: number; end: number; color: string }> }) {
-  const lines: string[] = [];
-  const assignmentStart = /^([A-Za-z][A-Za-z0-9_']*(?:\s*\/\s*[A-Za-z][A-Za-z0-9_']*)?)\s*(?::|=)/;
-  for (const rawLine of value.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    if (lines.length && !assignmentStart.test(line)) {
-      lines[lines.length - 1] = `${lines[lines.length - 1]} ${line}`;
-    } else {
-      lines.push(line);
-    }
+function FormulaBlockList({ blocks, fallback }: { blocks: FormulaComparisonBlock[]; fallback?: string }) {
+  if (!blocks.length) {
+    return <div className="min-w-max whitespace-nowrap font-mono text-[11px] font-black" style={{ color: "#B91C1C" }}>{formatFormulaForDisplay(fallback || "Formula not available")}</div>;
   }
-  const color = tone === "good" ? "#1565C0" : tone === "warning" ? "#A16207" : "#B91C1C";
-  const renderHighlighted = (line: string, lineStart: number) => {
-    const relevant = highlights
-      .filter((span) => span.end > lineStart && span.start < lineStart + line.length)
-      .map((span) => ({ start: Math.max(0, span.start - lineStart), end: Math.min(line.length, span.end - lineStart), color: span.color }))
-      .sort((left, right) => left.start - right.start || right.end - left.end);
-    const parts: React.ReactNode[] = [];
-    let cursor = 0;
-    const pushUnmatched = (text: string, key: string) => {
-      if (text) parts.push(<span key={key} style={{ color, fontWeight: tone === "bad" ? 900 : 400 }}>{text}</span>);
-    };
-    relevant.forEach((span, index) => {
-      if (span.start < cursor) return;
-      if (span.start > cursor) pushUnmatched(line.slice(cursor, span.start), `${lineStart}-unmatched-${index}`);
-      parts.push(<span key={`${lineStart}-${index}`} style={{ color: span.color, fontWeight: tone === "bad" ? 900 : 400 }}>{line.slice(span.start, span.end)}</span>);
-      cursor = span.end;
+  return <div className="min-w-max space-y-1.5">
+    {blocks.map((block, index) => {
+      const color = block.status === "matched" ? "#1565C0" : "#B91C1C";
+      const label = block.originalLabel || block.label;
+      const expression = block.originalExpression || block.expression;
+      return <div key={`${label}-${index}`} className="whitespace-nowrap rounded-lg border-l-4 bg-white px-3 py-2 font-mono text-[11px] leading-5" style={{ borderLeftColor: color, color }}>
+        <span className="font-black">{label} = </span>
+        <span className="font-black">{formatFormulaForDisplay(expression || block.error || "Formula block not available")}</span>
+        {block.error && <span className="font-black"> · {block.error}</span>}
+      </div>;
+    })}
+  </div>;
+}
+
+function FormulaWithAstHighlights({ blockLabel, value, highlights, blockHighlights = [] }: { blockLabel: string; value: string; highlights: string[]; blockHighlights?: string[] }) {
+  const text = formatFormulaForDisplay(value || highlights.join(" · ") || "Formula text missing");
+  const isIntermediateBlock = /^S_V\d+$/i.test(blockLabel);
+  const findRanges = (values: string[], kind: "light" | "dark") => values.flatMap((highlight) => {
+    const target = formatFormulaForDisplay(highlight);
+    if (!target) return [];
+    const pattern = target.split(/\s+/).filter(Boolean).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*");
+    const match = new RegExp(pattern, "i").exec(text);
+    return match ? [{ start: match.index, end: match.index + match[0].length, kind }] : [];
+  });
+  const lightRanges = findRanges(blockHighlights, "light");
+  const darkRanges = findRanges(highlights, "dark");
+  const boundaries = Array.from(new Set([0, text.length, ...lightRanges.flatMap((range) => [range.start, range.end]), ...darkRanges.flatMap((range) => [range.start, range.end])])).sort((left, right) => left - right);
+  const parts: React.ReactNode[] = [];
+  const baseClass = isIntermediateBlock ? "text-red-500" : "text-coninco-ink";
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const start = boundaries[index];
+    const end = boundaries[index + 1];
+    if (end <= start) continue;
+    const dark = darkRanges.some((range) => range.start <= start && range.end >= end);
+    const light = !dark && lightRanges.some((range) => range.start <= start && range.end >= end);
+    const className = dark
+      ? "font-black text-red-900 underline decoration-2 underline-offset-2"
+      : light ? "rounded bg-red-50/80 text-red-500" : baseClass;
+    parts.push(<span key={`ast-part-${index}`} className={className}>{text.slice(start, end)}</span>);
+  }
+  return <span className={`whitespace-nowrap font-mono text-[10px] leading-5 ${isIntermediateBlock ? "rounded bg-red-50/80 px-1" : "text-coninco-ink"}`}>{parts.length ? parts : text}</span>;
+}
+
+function AstDifferenceList({ blocks, originalFormula }: { blocks: FormulaComparisonBlock[]; originalFormula: string }) {
+  const differences = blocks
+    .filter((block) => (block.astDifferences ?? []).length)
+    .map((block) => {
+      const blockDifferences = block.astDifferences ?? [];
+      const originalFallback = blockDifferences.map((difference) => difference.original).filter(Boolean).join(" · ");
+      const standardFallback = blockDifferences.map((difference) => difference.standard).filter(Boolean).join(" · ");
+      return {
+        block,
+        key: `${block.originalLabel || block.label}-ast`,
+        label: block.originalLabel || block.label,
+        originalFormula: block.astOriginalExpression || originalFormula || originalFallback,
+        standardFormula: block.astStandardExpression || block.originalExpression || block.expression || standardFallback,
+        differences: blockDifferences,
+      };
     });
-    if (cursor < line.length) pushUnmatched(line.slice(cursor), `${lineStart}-unmatched-last`);
-    return parts;
-  };
-  return <div className="min-w-max space-y-1.5 font-mono text-[11px] leading-5" style={{ color }}>
-    {highlights.length
-      ? <div className="whitespace-nowrap font-normal">{renderHighlighted(value, 0)}</div>
-      : lines.map((line, index) => <div key={`${index}-${line}`} className="whitespace-nowrap" style={{ ...(highlightColor ? { color: highlightColor } : {}), fontWeight: tone === "bad" ? 900 : 400 }}>{line}</div>)}
+  if (!differences.length) return null;
+  return <div className="min-w-[700px] space-y-2">
+    {differences.map(({ block, key, label, originalFormula: blockOriginalFormula, standardFormula, differences: blockDifferences }, index) => <div key={key} className="rounded-lg border-l-4 border-red-700 bg-red-50/70 px-3 py-2 leading-5">
+      <div className="mb-1 font-black uppercase tracking-wide text-red-900">{index + 1}. {label} · AST mismatch</div>
+      <div className="flex min-w-max items-start gap-2"><span className={`w-32 shrink-0 text-right font-black ${/^S_V\d+$/i.test(label) ? "text-red-500" : "text-red-900"}`}>Original {label}:</span><FormulaWithAstHighlights blockLabel={label} blockHighlights={block.astBlockOriginalExpressions ?? []} value={blockOriginalFormula} highlights={blockDifferences.map((difference) => difference.original)} /></div>
+      <div className="flex min-w-max items-start gap-2"><span className={`w-32 shrink-0 text-right font-black ${/^S_V\d+$/i.test(label) ? "text-red-500" : "text-red-900"}`}>{label}:</span><FormulaWithAstHighlights blockLabel={label} blockHighlights={block.astBlockStandardExpressions ?? []} value={standardFormula} highlights={blockDifferences.map((difference) => difference.standard)} /></div>
+    </div>)}
   </div>;
 }
 

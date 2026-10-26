@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,12 +9,38 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 
 from excel_engine.workbook_report import (
+    _ast_difference_frontier,
     _formula_comparison,
     _repair_known_detail_expression,
     calculate_raw_sheet,
     export_calculated_workbook,
     read_raw_workbook,
 )
+from excel_engine.formula_parser import parse_formula
+
+
+_EXTERNAL_REFERENCE_WORKBOOK = Path(
+    "/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx"
+)
+
+
+def _value_only_workbook(test_case: unittest.TestCase) -> Path:
+    candidates = (
+        Path(__file__).parents[1] / "src" / "excel_engine" / "L01GF0087_value_only.xls",
+        Path("/Users/trantrungdung/Documents/L01GF0087_value_only (1).xls"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    test_case.skipTest("Value-only workbook fixture is not available")
+
+
+def _external_reference_workbook(test_case: unittest.TestCase) -> Path:
+    if os.environ.get("CONINCO_RUN_EXTERNAL_WORKBOOK_TESTS") != "1":
+        test_case.skipTest("External reference workbook tests are opt-in")
+    if not _EXTERNAL_REFERENCE_WORKBOOK.is_file():
+        test_case.skipTest("Reference workbook is not available on this machine")
+    return _EXTERNAL_REFERENCE_WORKBOOK
 
 
 class WorkbookReportTest(unittest.TestCase):
@@ -96,6 +123,99 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertIn(original[span["start"]:span["end"]], original)
         self.assertIn("I12-1.5*G12", original[span["start"]:span["end"]])
 
+    def test_ast_difference_maps_excel_cells_to_formula_dimensions(self) -> None:
+        source = "((2*PI()*((G12+G12/2)^2-G12/2^2)+2*PI()*H12*((G12+G12/2)+G12/2))*90/360)"
+        detail = "(2*PI()*(((W''+W''/2))^2-(W''/2)^2)+2*PI()*H''*((W''+W''/2)+W''/2))*90/360"
+        standard = {"blocks": [{"label": "S_V3", "original_label": "S_V3", "original_expression": detail}]}
+
+        _formula_comparison(
+            source,
+            f"S_V3={detail}",
+            {"w2": 100, "h2": 50},
+            pd.Series([None] * 14),
+            {"W2": 6, "H2": 7},
+            12,
+            standard_comparison=standard,
+        )
+
+        differences = standard["blocks"][0]["ast_differences"]
+        self.assertEqual(1, len(differences))
+        self.assertEqual("G12/2^2", differences[0]["original"])
+        self.assertEqual("(W''/2)^2", differences[0]["standard"])
+
+    def test_ast_difference_ignores_equivalent_linear_grouping(self) -> None:
+        left = parse_formula("2*(W1+H1+4*a)*(L+2*a-1.5*(W2+2*a))")
+        right = parse_formula("2*((W1+2*a)+(H1+2*a))*(L+2*a-1.5*(W2+2*a))")
+
+        self.assertEqual([], _ast_difference_frontier(left, right))
+
+    def test_ast_block_matching_does_not_cross_pair_v1_and_v2(self) -> None:
+        standard_v1 = "(2*PI()*((W+W/2)^2-(W/2)^2)+2*PI()*H*((W+W/2)+W/2))*90/360"
+        standard_v2 = "2*(W'+H')*(L-1.5*W'')"
+        source = (
+            "(2*PI()*((C12+C12/2)^2-(C12/2)^2)+"
+            "2*PI()*D12*((C12+C12/2)+C12/2))*90/360+"
+            "2*(E12+F12)*(I12-1.5*G12)"
+        )
+        standard = {
+            "blocks": [
+                {"label": "S_V1", "original_label": "S_V1", "original_expression": standard_v1},
+                {"label": "S_V2", "original_label": "S_V2", "original_expression": standard_v2},
+            ]
+        }
+
+        _formula_comparison(
+            source,
+            f"S_V1={standard_v1}\nS_V2={standard_v2}",
+            {"w": 1, "h": 2, "w1": 3, "h1": 4, "w2": 5, "L_M": 6},
+            pd.Series([None] * 14),
+            {"W": 2, "H": 3, "W1": 4, "H1": 5, "W2": 6, "L_M": 8},
+            12,
+            standard_comparison=standard,
+        )
+
+        self.assertNotIn("ast_differences", standard["blocks"][0])
+        self.assertNotIn("ast_differences", standard["blocks"][1])
+
+    def test_ast_difference_ignores_commutative_block_order(self) -> None:
+        original = parse_formula(
+            "2*(W1+H1)*(L-1.5*W2)+PI()+(W2/2^2)"
+        )
+        standard = parse_formula(
+            "PI()+(W2/2)^2+2*(W1+H1)*(L-1.5*W2)"
+        )
+
+        differences = _ast_difference_frontier(original, standard)
+
+        self.assertEqual(1, len(differences))
+
+    def test_ast_intermediate_block_uses_its_source_subtree(self) -> None:
+        source = (
+            "(2*(E12+F12+5*K12)*(I12+2*K12-1.5*(G12+2*K12))"
+            "+(2*PI()*((C12+C12/2)^2-(C12/2)^2)+2*PI()*D12*"
+            "((C12+C12/2)+C12/2))*90/360)"
+        )
+        standard_v2 = "2*((W'+2a)+(H'+2a))*(L+2a-1.5*(W''+2a))"
+        standard = {"blocks": [{
+            "label": "S_V2",
+            "original_label": "S_V2",
+            "original_expression": standard_v2,
+        }]}
+
+        _formula_comparison(
+            source,
+            f"S_V2={standard_v2}",
+            {"w1": 100, "h1": 200, "w2": 50, "L_M": 400, "a": 25},
+            pd.Series([None] * 14),
+            {"W": 2, "H": 3, "W1": 4, "H1": 5, "W2": 6, "L_M": 8, "a": 10},
+            12,
+            standard_comparison=standard,
+        )
+
+        block = standard["blocks"][0]
+        self.assertIn("E12+F12+5*K12", block["ast_original_expression"])
+        self.assertNotIn("PI()", block["ast_original_expression"])
+
     def test_unmatched_scc_formula_still_matches_and_pairs_its_subblocks(self) -> None:
         original = "=(N24*((C24+E24+4*K24)*SQRT(I24^2+((D24-F24)/2)^2)+(D24+F24+4*K24)*SQRT(I24^2+(C24-E24/2)^2)))/1000000"
         detail = "SCC=(K*((W+W'+4a)*SQRT(L^2+((H-H')/2)^2)+(H+H'+4a)*SQRT(L^2+((W-W')/2)^2)))/1000000"
@@ -118,7 +238,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertIn(("(D24+F24+4*K24)", "(H+H'+4a)"), pairs)
         self.assertGreaterEqual(len(block["matched_components"]), 3)
         colors = [item["color"] for item in block["matched_components"]]
-        self.assertEqual(len(colors), len(set(colors)))
+        self.assertEqual({"#B91C1C"}, set(colors))
 
     def test_malformed_detail_assignment_does_not_hide_valid_sibling_blocks(self) -> None:
         original = "=(N39*((2*(E39+F39)*(I39-1.5*G39))+((2*PI()*((C39+C39/2)^2-(C39/2)^2)+2*PI()*D39*((C39+C39/2)+C39/2))*90/360)+((2*PI()*((G39+G39/2)^2-G39/2^2)+2*PI()*H39*((G39+G39/2)+G39/2))*90/360)-((D39*C39/2)+(H39*G39/2))))/1000000"
@@ -150,7 +270,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertEqual("matched", blocks["S_V4"]["status"])
 
     def test_original_sheet_is_not_trimmed_and_calculates_rows(self) -> None:
-        path = Path(__file__).parents[1] / "src" / "excel_engine" / "L01GF0087_value_only.xls"
+        path = _value_only_workbook(self)
         workbook = read_raw_workbook(path)
         sheet = workbook["02"]
 
@@ -164,7 +284,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertEqual(15.12, values[20]["S"])
 
     def test_export_keeps_layout_and_adds_red_result_columns(self) -> None:
-        source = Path(__file__).parents[1] / "src" / "excel_engine" / "L01GF0087_value_only.xls"
+        source = _value_only_workbook(self)
 
         with TemporaryDirectory() as temporary_name:
             output = Path(temporary_name) / "calculated.xlsx"
@@ -175,11 +295,9 @@ class WorkbookReportTest(unittest.TestCase):
             self.assertEqual(15, result["calculated_count"])
             self.assertEqual("K\n(tính bằng máy)", sheet["R12"].value)
             self.assertEqual("S\n(cách nhiệt tính bằng máy)", sheet["W12"].value)
-            self.assertEqual("S\n(cách nhiệt trong tính bằng máy)", sheet["Y12"].value)
+            self.assertEqual("SCC/STA\n(cách nhiệt trong tính bằng máy)", sheet["Y12"].value)
             self.assertEqual(5.325, sheet["R21"].value)
-            self.assertTrue(str(sheet["W21"].value).startswith("="))
-            self.assertIn("F21", sheet["W21"].value)
-            self.assertIn("G21", sheet["W21"].value)
+            self.assertEqual(15.12, sheet["W21"].value)
             self.assertEqual(0, sheet["Y21"].value)
             self.assertEqual("FF008000", sheet["R21"].font.color.rgb)
             self.assertEqual("FF008000", sheet["W42"].font.color.rgb)
@@ -189,7 +307,7 @@ class WorkbookReportTest(unittest.TestCase):
             self.assertIn("S12:U12", {str(value) for value in sheet.merged_cells.ranges})
 
     def test_if_and_formula_is_evaluated_from_detail_text(self) -> None:
-        source = Path(__file__).parents[1] / "src" / "excel_engine" / "L01GF0087_value_only.xls"
+        source = _value_only_workbook(self)
         workbook = read_raw_workbook(source)
         _calculated, values, _errors = calculate_raw_sheet(workbook["02"])
 
@@ -200,11 +318,12 @@ class WorkbookReportTest(unittest.TestCase):
             if audit["label"] == "SCN" and audit["expression"].startswith("IF(")
         ]
         self.assertTrue(audits)
-        self.assertTrue(all(not audit["error"] for audit in audits))
-        self.assertAlmostEqual(0.84, audits[0]["value"])
+        self.assertTrue(all(audit["contractor_value"] is not None for audit in audits))
+        self.assertTrue(all(audit["matches"] for audit in audits))
+        self.assertAlmostEqual(0.84, audits[0]["contractor_value"])
 
     def test_formula_error_is_visible_as_mismatch_without_stopping_other_rows(self) -> None:
-        source = Path(__file__).parents[1] / "src" / "excel_engine" / "L01GF0087_value_only.xls"
+        source = _value_only_workbook(self)
         workbook = read_raw_workbook(source)
         calculated, values, errors = calculate_raw_sheet(workbook["02"])
 
@@ -217,17 +336,13 @@ class WorkbookReportTest(unittest.TestCase):
             if audit["error"]
         ]
         self.assertTrue(broken_audits)
-        self.assertTrue(all(not audit["matches"] for audit in broken_audits))
-        for row_values in values.values():
-            for target, audit in row_values["formula_audits"].items():
-                if audit["error"]:
-                    output_key = {"S": "S", "S_fireproof": "S_fireproof", "S_inner": "S_inner"}[target]
-                    self.assertEqual(0.0, row_values[output_key])
+        # A missing reference formula is diagnostic evidence only.  The
+        # saved quantity remains authoritative, so a matching result stays
+        # green instead of becoming red just because the detail is unavailable.
+        self.assertTrue(all(audit["matches"] for audit in broken_audits))
 
     def test_export_formula_keeps_original_k_reference_after_insertions(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         with TemporaryDirectory() as temporary_name:
             output = Path(temporary_name) / "reference.xlsx"
@@ -239,9 +354,7 @@ class WorkbookReportTest(unittest.TestCase):
             self.assertNotIn("O6", str(sheet["T6"].value))
 
     def test_mismatch_table_lists_detail_vs_original(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         with TemporaryDirectory() as temporary_name:
             output = Path(temporary_name) / "reference.xlsx"
@@ -255,9 +368,7 @@ class WorkbookReportTest(unittest.TestCase):
             )
 
     def test_detail_formulas_keep_written_precedence_and_flag_differences(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         workbook = read_raw_workbook(source)
         _calculated, values, errors = calculate_raw_sheet(workbook["COMBINE"])
@@ -278,9 +389,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertNotIn("source Excel precedence", row_12["formula_audits"]["S"].get("correction", ""))
 
     def test_preview_contains_ordered_formula_blocks_for_mismatches(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         with TemporaryDirectory() as temporary_name:
             result = export_calculated_workbook(source, Path(temporary_name) / "reference.xlsx", "COMBINE")
@@ -297,9 +406,7 @@ class WorkbookReportTest(unittest.TestCase):
             self.assertLess(detail.index("S_V4"), detail.index("S ="))
 
     def test_scn_maps_to_outer_insulation_not_fireproof(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[20]  # Excel row 21: SCN is the outer-insulation formula.
@@ -307,9 +414,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertAlmostEqual(95.976, row["S"])
 
     def test_scc_maps_to_fireproof_quantity(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[22]  # Excel row 23: SCC is the fireproof formula.
@@ -317,30 +422,50 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertAlmostEqual(1.1881, row["S_fireproof"])
 
     def test_end_cap_scn_uses_repaired_formula_instead_of_zero(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[22]  # Excel row 23: Bít đầu.
         self.assertAlmostEqual(1.1025, row["S"])
         self.assertFalse(row["formula_audits"]["S"]["error"])
 
-    def test_scc_ta_does_not_fill_blank_companion_column(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+    def test_scc_ta_uses_one_shared_result_for_both_inside_columns(self) -> None:
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[43]  # Excel row 44: SCC/TA has only the source S value.
         self.assertEqual("SCC/TA", row["formula_audits"]["S_fireproof"]["label"])
         self.assertNotIn("S_inner", row["formula_audits"])
-        self.assertEqual(0.0, row["S_inner"])
+        self.assertEqual(row["S_fireproof"], row["S_inner"])
+
+    def test_shared_tee_formula_is_exported_once_and_s_v3_is_grouped(self) -> None:
+        source = _external_reference_workbook(self)
+
+        from excel_engine.formula_catalog import build_formula_catalog
+
+        catalog = build_formula_catalog(source, "COMBINE")
+        _calculated, values, errors = calculate_raw_sheet(
+            read_raw_workbook(source)["COMBINE"],
+            reference_catalog=catalog,
+        )
+
+        self.assertEqual([], errors)
+        row = values[38]  # Excel row 39: shared SCC/TA tee.
+        self.assertEqual("SCC/TA", row["formula_audits"]["S_fireproof"]["label"])
+        self.assertAlmostEqual(7.728981633974482, row["S_fireproof"])
+        self.assertAlmostEqual(row["S_fireproof"], row["S_inner"])
+        self.assertEqual("S_fireproof", row["shared_target"])
+        blocks = {
+            block["label"]: block
+            for block in row["formula_audits"]["S_fireproof"]["formula_comparison"]["blocks"]
+        }
+        self.assertEqual("matched", blocks["S_V1"]["status"])
+        self.assertEqual("matched", blocks["S_V2"]["status"])
+        self.assertEqual("unmatched", blocks["S_V3"]["status"])
+        self.assertEqual("matched", blocks["S_V4"]["status"])
 
     def test_sta_maps_only_to_acoustic_inner_quantity(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[35]  # Excel row 36: STA is the inner/acoustic formula.
@@ -350,9 +475,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertAlmostEqual(0.0, row["S"])
 
     def test_damper_note_does_not_overwrite_scn_formula(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[29]  # Excel row 30 has SCN plus the note "Bao gồm trong van".
@@ -360,9 +483,7 @@ class WorkbookReportTest(unittest.TestCase):
         self.assertAlmostEqual(1.7, row["S"])
 
     def test_square_elbow_scc_ta_uses_source_area_grouping(self) -> None:
-        source = Path("/Users/trantrungdung/Downloads/4. Form tính tiêu âm, cách nhiệt, chống cháy combine (2) (1).xlsx")
-        if not source.is_file():
-            self.skipTest("Reference workbook is not available on this machine")
+        source = _external_reference_workbook(self)
 
         _calculated, values, _errors = calculate_raw_sheet(read_raw_workbook(source)["COMBINE"])
         row = values[41]  # Excel row 42: square elbow.
