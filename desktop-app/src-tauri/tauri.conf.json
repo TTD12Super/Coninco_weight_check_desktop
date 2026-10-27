@@ -27,6 +27,11 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.png"],
-    "resources": ["engine/*"]
+    "resources": ["engine/*"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    }
   }
 }
