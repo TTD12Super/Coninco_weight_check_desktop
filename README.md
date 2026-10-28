@@ -49,6 +49,165 @@ Compare saved workbook values
 Export calculated workbook + comparison preview + local archive entry
 ```
 
+## Python engine workflows (`excel_engine.main`)
+
+The Python sidecar receives one JSON object from stdin, dispatches it by
+`request.action`, and returns one JSON object on stdout. The desktop app uses
+the `export_calculated_workbook` branch for **Run Audit**.
+
+### 1. Request dispatch
+
+```mermaid
+flowchart TD
+    A[JSON stdin] --> B[main]
+    B --> C[process_request]
+    C --> D{request.action}
+    D -->|list_sheets| E[inspect_file]
+    D -->|list_reference_sheets| F[list_reference_sheets]
+    D -->|load_reference_catalog| G[build_formula_catalog]
+    D -->|export_calculated_workbook| H[export_calculated_workbook]
+    D -->|process_contractor| I[process_workbook legacy]
+    D -->|calculate| J[calculate one product legacy]
+    D -->|unknown + files| K[inspect_file for each path]
+    E --> L[JSON response]
+    F --> L
+    G --> L
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+    L --> M[stdout]
+```
+
+Every branch converts expected input errors into the common response shape:
+`ok`, `result` or `files`, and `errors`.
+
+### 2. Inspect contractor workbook sheets: `list_sheets`
+
+```mermaid
+flowchart LR
+    A[Path from request] --> B[Path.expanduser().resolve]
+    B --> C[read_workbook]
+    C --> D[Read all worksheets]
+    D --> E[Collect name, rows, columns, column_names]
+    E --> F[Return workbook metadata]
+```
+
+This workflow only inspects the workbook structure. It does not calculate
+quantities or compare formulas.
+
+### 3. List reference sheets: `list_reference_sheets`
+
+```mermaid
+flowchart LR
+    A[Reference path] --> B[_workbook_path]
+    B --> C{File type}
+    C -->|xlsx/xls| D[Use original path]
+    C -->|numbers| E[Apple Numbers exports temporary xlsx]
+    D --> F[_sheet_names]
+    E --> F
+    F --> G[Return sheet names]
+```
+
+The temporary `.xlsx` created for a `.numbers` file is deleted when the
+workflow finishes.
+
+### 4. Build the formula catalog: `load_reference_catalog`
+
+```mermaid
+flowchart TD
+    A[Reference workbook + selected sheet] --> B[_workbook_path]
+    B --> C[_read_workbook]
+    C --> D[Select requested sheet]
+    D --> E[Iterate reference rows]
+    E --> F[Detect product name and product type]
+    F --> G[Read formula detail columns]
+    G --> H[extract_assignments]
+    H --> I[Keep S, SCN, SCC, STA, SCC/TA and S_V blocks]
+    I --> J[Parse signature when valid]
+    J --> K[Catalog entries]
+    K --> L[Return sheet, entries, count]
+```
+
+The catalog is the authority for Run Audit. This workflow reads formula
+descriptions; it does not calculate the reference workbook.
+
+### 5. Run Audit: `export_calculated_workbook`
+
+```mermaid
+flowchart TD
+    A[Contractor workbook + reference_catalog] --> B[Validate input/output paths]
+    B --> C[read_raw_workbook]
+    C --> D[detect_source_columns]
+    D --> E[calculate_raw_sheet]
+    E --> F{For each usable row}
+    F --> G[Normalize inputs and detect section]
+    G --> H[Calculate K from Plan/Up-down/Vertical when present]
+    H --> I[Classify product type and formula profile]
+    I --> J[Match standard formula by product/category/family/target]
+    J --> K[Parse and evaluate standard formula]
+    K --> L[Compare standard result with saved contractor quantity]
+    L --> M{Saved value matches?}
+    M -->|yes| N[Mark green; skip formula mismatch verdict]
+    M -->|no| O[Parse contractor detail and compare AST blocks]
+    O --> P[Mark matching blocks blue and mismatched blocks red]
+    N --> Q[Store row result]
+    P --> Q
+    F -->|all rows| R[Insert calculated columns]
+    R --> S[Write output xlsx]
+    S --> T[Write formula comparison table]
+    T --> U[Write preview TSV]
+    U --> V[Return paths and summary counts]
+```
+
+Important authority rule:
+
+```text
+reference catalog -> standard formula -> standard calculation -> output file
+contractor formula -> row classification and mismatch explanation only
+```
+
+Rows without enough product or geometry input are skipped. A shared
+`SCC/TA` formula is evaluated once and its result is copied to both SCC and
+STA output columns when those columns are separate.
+
+### 6. Legacy direct calculation workflows
+
+These branches remain available for compatibility but are not used by the
+desktop **Run Audit** button.
+
+#### `process_contractor`
+
+```mermaid
+flowchart LR
+    A[Workbook request] --> B[read_contractor_sheet]
+    B --> C[Normalize legacy Sheet 02 layout]
+    C --> D[ProductFormat.from_row for each row]
+    D --> E[ProductFormat.calculate]
+    E --> F[Return calculated rows and errors]
+```
+
+#### `calculate`
+
+```mermaid
+flowchart LR
+    A[section + product_type + inputs] --> B[formula_engine.calculate]
+    B --> C[Built-in product formula]
+    C --> D[CalculationResult.to_dict]
+    D --> E[JSON response]
+```
+
+#### Unknown action with `files`
+
+```mermaid
+flowchart LR
+    A[Unknown action + files list] --> B[Inspect each file]
+    B --> C[Collect successful metadata]
+    B --> D[Collect per-file errors]
+    C --> E[Return files and errors]
+    D --> E
+```
+
 ## User interface
 
 The desktop application contains four pages:
@@ -209,16 +368,12 @@ row count, mismatch count and creation time in local SQLite.
 │   ├── src/excel_engine/
 │   │   ├── main.py                   # JSON stdin/stdout process contract
 │   │   ├── excel_reader.py            # .xlsx/.xls reader boundary
-│   │   ├── excel_converter.py         # Excel conversion helpers
 │   │   ├── input_formats.py           # Header and quantity-column detection
 │   │   ├── product_formatter.py       # Product classification and inputs
-│   │   ├── formula_engine.py          # Built-in product calculations
-│   │   ├── formula_strings.py          # Formula text emitted by calculators
 │   │   ├── formula_parser.py           # Normalize, tokenize, parse and evaluate
 │   │   ├── formula_catalog.py          # Reference formula extraction/matching
 │   │   ├── workbook_report.py          # Audit, AST compare and Excel export
 │   │   ├── quantity_calculator.py      # K component calculation
-│   │   ├── contractor_processor.py     # Contractor processing compatibility API
 │   │   ├── test.ipynb                 # Parser/debug walkthrough notebook
 │   │   └── README.md                  # Package-level export notes
 │   └── tests/                         # Unit and integration-style tests
@@ -362,13 +517,15 @@ complete `formula_block`, source sheet/row and a parsed signature when valid.
 ```
 
 `reference_catalog` may be supplied in the request to avoid reading the
-reference workbook again. The response contains `calculated_count`,
+reference workbook again. Run Audit always follows this order: require the
+catalog, match the standard formula by product/category/family, parse and
+evaluate that standard formula, then export the result. The response contains
+`calculated_count`,
 `mismatch_count`, `reference_formula_count`, `preview`, output paths and any
 row-level errors.
 
-Other supported actions are `process_contractor` and `calculate`. An unknown
-action with a non-empty `files` list falls back to workbook inspection for
-backward compatibility.
+An unknown action with a non-empty `files` list falls back to workbook
+inspection for backward compatibility.
 
 ## Formula parser pipeline
 

@@ -1,3 +1,5 @@
+/** Shared UI models exchanged between React, Tauri, and Python-generated previews. */
+
 export type Page = "process" | "catalog" | "archive" | "comparison";
 
 export type FormulaCatalogEntry = {

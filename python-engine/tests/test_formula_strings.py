@@ -1,3 +1,5 @@
+"""Unit tests for generated Excel formula text and cell-reference mapping."""
+
 import unittest
 
 from excel_engine import formula_engine as engine
@@ -5,6 +7,8 @@ from excel_engine.formula_strings import _FORMULAS, excel_input_references, form
 
 
 class FormulaStringsTest(unittest.TestCase):
+    """Verify formula strings stay aligned with numeric calculators."""
+    # Confirm every numeric calculator has three valid Excel outputs.
     def test_every_registered_calculator_has_three_excel_formulas(self) -> None:
         for section, calculators in engine._CALCULATORS.items():
             for product_type in calculators:
@@ -18,6 +22,7 @@ class FormulaStringsTest(unittest.TestCase):
                     self.assertNotIn("**", formula)
                     self.assertNotRegex(formula, r"\b(?:x|sqrt)\.")
 
+    # Confirm generated convenience functions return formula text.
     def test_formula_functions_return_strings(self) -> None:
         for name in _FORMULAS:
             primary = getattr(__import__("excel_engine.formula_strings", fromlist=[name]), f"{name}_formula")
@@ -27,6 +32,7 @@ class FormulaStringsTest(unittest.TestCase):
             self.assertTrue(secondary().startswith("="))
             self.assertTrue(tertiary().startswith("="))
 
+    # Confirm Excel functions and row-specific cell references are preserved.
     def test_excel_functions_and_cell_references_are_supported(self) -> None:
         formulas = formula_strings("standard", "square_round_reducer")
         self.assertIn("PI()", formulas[0])

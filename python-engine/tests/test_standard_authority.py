@@ -1,3 +1,5 @@
+"""Authority tests proving Run Audit calculates from the standard catalog."""
+
 import unittest
 
 import pandas as pd
@@ -7,6 +9,7 @@ from excel_engine.workbook_report import calculate_raw_sheet
 
 
 def row_for(description, *, W=360, H=360, R=180, K=2, outer="", inner="", plan="", up_down="", vertical=""):
+    """Build one minimal raw worksheet row for authority tests."""
     values = [None] * 25
     values[2] = description
     values[5] = W
@@ -24,10 +27,12 @@ def row_for(description, *, W=360, H=360, R=180, K=2, outer="", inner="", plan="
 
 
 def catalog(*entries):
+    """Build the smallest catalog payload accepted by the report workflow."""
     return {"entries": list(entries), "count": len(entries), "sheet": "COMBINE"}
 
 
 def entry(product_type, target, formula, category, family):
+    """Build one standard catalog entry with the requested lookup keys."""
     return {
         "name": "Co Vuông",
         "product_type": product_type,
@@ -41,6 +46,8 @@ def entry(product_type, target, formula, category, family):
 
 
 class StandardAuthorityTest(unittest.TestCase):
+    """Verify contractor text classifies rows but never becomes authority."""
+    # Confirm contractor text is not the numeric calculation authority.
     def test_contractor_formula_is_not_used_for_calculation(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", outer="S=(W+H)/1000000")
@@ -57,6 +64,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertNotAlmostEqual(output[0]["S"], 0.00072)
         self.assertEqual("different", output[0]["formula_audits"]["S"]["reference_status"])
 
+    # Confirm shared SCC/TA is evaluated once as one inside quantity.
     def test_scc_ta_is_one_inside_quantity(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", outer="S=(W+H)*K/1000000", inner="SCC/TA=(W+H)*K/1000000")
@@ -74,6 +82,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertNotIn("S_fireproof", output[0]["formula_audits"])
         self.assertAlmostEqual(output[0]["S_inner"], output[0]["S"])
 
+    # Confirm SCC falls back to the shared inside column in a two-column sheet.
     def test_scc_uses_shared_inner_target_in_two_column_layout(self):
         data = pd.DataFrame([
             row_for(
@@ -94,6 +103,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertNotIn("S_fireproof", output[0]["formula_audits"])
         self.assertAlmostEqual(output[0]["S_inner"], output[0]["S"])
 
+    # Confirm cosmetic parentheses do not create a false numeric mismatch.
     def test_parentheses_only_difference_is_ignored_when_value_matches(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", outer="S=((K*(W+H)))/1000000")
@@ -110,6 +120,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertIsNone(output[0]["formula_audits"]["S"]["formula_comparison"])
         self.assertTrue(output[0]["matches"]["S"])
 
+    # Confirm a matching saved value stays valid when detail parsing fails.
     def test_matching_value_stays_green_when_detail_text_is_unverifiable(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", outer="S=((W+H)*K/1000000")
@@ -127,6 +138,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertFalse(output[0]["formula_audits"]["S"]["error"])
         self.assertIsNone(output[0]["formula_audits"]["S"]["formula_comparison"])
 
+    # Confirm the MFD included-in-valve exception chooses one outer quantity.
     def test_mfd_scn_with_inside_quantity_included_uses_one_outer_quantity(self):
         data = pd.DataFrame([
             row_for(
@@ -163,6 +175,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertTrue(output[0]["matches"]["S"])
         self.assertNotIn("S_inner", output[0]["formula_audits"])
 
+    # Confirm non-MFD family mapping follows labels, not formula appearance.
     def test_non_mfd_family_comes_from_labels_not_formula_shape(self):
         data = pd.DataFrame([
             row_for(
@@ -183,6 +196,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertEqual(20.0, output[0]["S"])
         self.assertEqual("STA", output[0]["formula_audits"]["S_inner"]["label"])
 
+    # Confirm K is recomputed only when a K component is populated.
     def test_k_uses_components_only_when_any_component_is_present(self):
         data = pd.DataFrame([
             row_for("Square elbow 360x360", K=4, outer="S=(W+H)*K/1000000", plan="", up_down="", vertical=""),
@@ -198,6 +212,7 @@ class StandardAuthorityTest(unittest.TestCase):
         self.assertEqual(4, output[0]["K"])
         self.assertEqual(6, output[1]["K"])
 
+    # Confirm a volume-control damper maps to its own product type.
     def test_volume_control_damper_is_not_an_elbow(self):
         self.assertEqual("nrd_valve", _product_type("Volume control damper (VCD) 400x200"))
 

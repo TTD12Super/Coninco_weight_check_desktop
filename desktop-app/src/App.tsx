@@ -1,3 +1,5 @@
+/** Main React shell: process a workbook, browse formulas, and review archives. */
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Archive, ArrowLeft, ArrowUpRight, BarChart3, Check, ChevronDown, CircleHelp, CloudUpload,
@@ -11,8 +13,10 @@ import {
 } from "./lib/engine";
 import type { ArchiveEntry, ComparisonRow, FormulaAudit, FormulaCatalogEntry, Page } from "./types";
 
+/** Keep displayed quantities consistent with the workbook audit precision. */
 const n = (value: number) => value.toFixed(3);
 
+/** Own the page state and coordinate all user actions with the engine bridge. */
 function App() {
   const [page, setPage] = useState<Page>("process");
   const [referencePath, setReferencePath] = useState("");
@@ -33,7 +37,9 @@ function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ArchiveEntry | null>(null);
 
+  /** Refresh the local archive list after startup or a completed audit. */
   const refreshArchive = async () => setArchive(await listArchive());
+  /** Restore the saved standard workbook and its selectable sheet on startup. */
   const restoreReference = async () => {
     try {
       const saved = await loadReferenceWorkbook();
@@ -59,6 +65,7 @@ function App() {
     `${entry.name} ${entry.category} ${entry.productType} ${entry.target} ${entry.formula} ${entry.formulaBlock}`
       .toLowerCase().includes(catalogSearch.toLowerCase())), [catalog, catalogSearch]);
 
+  /** Select the contractor workbook and populate its worksheet selector. */
   const selectWorkbook = async () => {
     const chosen = await chooseWorkbook();
     if (!chosen) return;
@@ -67,6 +74,7 @@ function App() {
     catch (error) { setMessage(error instanceof Error ? error.message : "Could not read workbook"); }
   };
 
+  /** Save the standard workbook, then populate its worksheet selector. */
   const selectReference = async () => {
     const chosen = await chooseReferenceWorkbook();
     if (!chosen) return;
@@ -85,6 +93,7 @@ function App() {
     }
   };
 
+  /** Load the selected standard sheet into the Formula Catalog page. */
   const openCatalog = async () => {
     if (!referencePath || !referenceSheet) {
       setPage("catalog");
@@ -106,6 +115,7 @@ function App() {
     }
   };
 
+  /** Export the currently parsed catalog as a reusable JSON file. */
   const exportCatalog = async () => {
     if (!referencePath || !referenceSheet || !catalog.length || busy) return;
     setBusy(true);
@@ -127,6 +137,7 @@ function App() {
     }
   };
 
+  /** Remove the saved standard workbook from local app storage. */
   const removeReference = async () => {
     if (!referencePath || busy) return;
     try {
@@ -143,6 +154,7 @@ function App() {
     }
   };
 
+  /** Start the end-to-end Run Audit workflow and refresh the archive. */
   const audit = async () => {
     if (!referencePath || !referenceSheet || !path || !sheet) return;
     setBusy(true); setProgress(12); setMessage("Copying submitted workbook into the local archive…");
@@ -154,6 +166,7 @@ function App() {
     finally { window.clearInterval(timer); window.setTimeout(() => setProgress(0), 800); setBusy(false); }
   };
 
+  /** Load one archived audit's preview rows for the comparison page. */
   const viewComparison = async (entry: ArchiveEntry) => {
     setSelected(entry); setBusy(true); setMessage("Loading comparison data…");
     try { setRows(await loadComparison(entry.id)); setPage("comparison"); }
@@ -161,6 +174,7 @@ function App() {
     finally { setBusy(false); }
   };
 
+  /** Delete the selected archive entry and its stored files. */
   const removeEntry = async (entry: ArchiveEntry) => {
     try {
       await deleteArchive(entry.id);
@@ -171,6 +185,7 @@ function App() {
     }
   };
 
+  /** Confirm the pending destructive archive deletion. */
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     const entry = pendingDelete;
@@ -207,6 +222,7 @@ function App() {
   </div>;
 }
 
+/** Render one sidebar navigation item with active state and optional count. */
 function NavButton({ active, icon, label, badge, onClick }: { active: boolean; icon: React.ReactNode; label: string; badge?: number; onClick: () => void }) {
   return <button onClick={onClick} className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${active ? "bg-coninco-red text-white shadow-red" : "text-coninco-muted hover:bg-coninco-soft hover:text-coninco-red"}`}><span className={active ? "text-white" : "text-coninco-muted group-hover:text-coninco-red"}>{icon}</span>{label}{badge !== undefined && <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] ${active ? "bg-white/20" : "bg-[#f1f2f3]"}`}>{badge}</span>}</button>;
 }
@@ -218,8 +234,11 @@ const catalogCategoryColors: Record<string, { text: string; background: string; 
 };
 const catalogTargetColors: Record<string, string> = { S: "#0F766E", SCN: "#2563EB", SCC: "#DC2626", STA: "#7C3AED", "SCC/TA": "#C2410C" };
 const catalogLineColors: Record<string, string> = { S: "#0F766E", SCN: "#2563EB", SCC: "#DC2626", STA: "#7C3AED", "SCC/TA": "#C2410C" };
+/** Turn the internal product key into a readable catalog label. */
 const prettyProductType = (value: string) => value ? value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Unknown product type";
+/** Show both categories for a shared SCC/TA formula. */
 const catalogCategoriesForEntry = (entry: FormulaCatalogEntry) => entry.target === "SCC/TA" ? ["Chống cháy", "Tiêu âm"] : [entry.category || "Uncategorized"];
+/** Make extracted formula text readable without changing its meaning. */
 const formatFormulaForDisplay = (value: string) => value
   .replace(/\s+/g, " ")
   .replace(/\(\s+/g, "(")
@@ -231,6 +250,7 @@ const formatFormulaForDisplay = (value: string) => value
   .replace(/ {2,}/g, " ")
   .trim();
 
+/** Display grouped standard products and their formula blocks. */
 function CatalogPage({ entries, search, setSearch, referencePath, referenceSheet, message, busy, canExport, exportCatalog }: { entries: FormulaCatalogEntry[]; search: string; setSearch: (value: string) => void; referencePath: string; referenceSheet: string; message: string; busy: boolean; canExport: boolean; exportCatalog: () => void }) {
   const categories = new Set(entries.flatMap(catalogCategoriesForEntry));
   const groups = useMemo(() => {
@@ -269,6 +289,7 @@ function CatalogPage({ entries, search, setSearch, referencePath, referenceSheet
   </div>;
 }
 
+/** Render the four-step input screen: reference, contractor, sheet, audit. */
 function ProcessPage({ referencePath, referenceSheet, referenceSheets, path, sheet, sheets, busy, progress, message, selectReference, removeReference, selectWorkbook, setReferenceSheet, setSheet, audit, setPage }: { referencePath: string; referenceSheet: string; referenceSheets: string[]; path: string; sheet: string; sheets: string[]; busy: boolean; progress: number; message: string; selectReference: () => void; removeReference: () => void; selectWorkbook: () => void; setReferenceSheet: (value: string) => void; setSheet: (value: string) => void; audit: () => void; setPage: (page: Page) => void }) {
   return <div className="animate-enter space-y-8">
     <div className="relative overflow-hidden rounded-[28px] bg-coninco-ink px-9 py-8 text-white shadow-soft"><div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-coninco-red/25 blur-3xl"/><div className="absolute bottom-[-100px] right-[30%] h-52 w-52 rounded-full bg-white/10 blur-3xl"/><div className="relative flex items-end justify-between"><div><div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[.18em] text-white/75"><Zap size={13} className="text-coninco-red"/> Precision audit workspace</div><h1 className="max-w-xl text-4xl font-black leading-tight tracking-tight">Turn contractor workbooks into <span className="text-coninco-red">clear evidence.</span></h1><p className="mt-3 max-w-lg text-sm leading-6 text-white/60">Read, calculate and compare locally with the original workbook always preserved.</p></div><div className="hidden w-48 animate-float rounded-3xl border border-white/10 bg-white/5 p-5 md:block"><BarChart3 className="mb-4 text-coninco-red" size={30}/><div className="text-2xl font-black">100%</div><div className="mt-1 text-xs text-white/50">local processing</div></div></div></div>
@@ -283,12 +304,15 @@ function ProcessPage({ referencePath, referenceSheet, referenceSheets, path, she
   </div>;
 }
 
+/** Render the numbered heading shared by each process section. */
 function SectionHeading({ number, title, subtitle, accent = false }: { number: string; title: string; subtitle: string; accent?: boolean }) { return <div className="flex items-start gap-3"><span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-black ${accent ? "bg-white text-coninco-red" : "bg-coninco-soft text-coninco-red"}`}>{number}</span><div><h2 className={`text-base font-black ${accent ? "text-coninco-ink" : "text-coninco-ink"}`}>{title}</h2><p className="mt-1 text-xs leading-5 text-coninco-muted">{subtitle}</p></div></div>; }
 
+/** Render archived audit entries and actions. */
 function ArchivePage({ entries, search, setSearch, viewComparison, removeEntry, setToast }: { entries: ArchiveEntry[]; search: string; setSearch: (value: string) => void; viewComparison: (entry: ArchiveEntry) => void; removeEntry: (entry: ArchiveEntry) => void; setToast: (value: string) => void }) {
   return <div className="animate-enter space-y-7"><div className="flex items-end justify-between"><div><div className="text-[11px] font-black uppercase tracking-[.2em] text-coninco-red">Workspace archive</div><h1 className="mt-2 text-3xl font-black tracking-tight">Stored workbooks</h1><p className="mt-2 text-sm text-coninco-muted">Submitted originals and processed results stay paired on this computer.</p></div><div className="rounded-2xl bg-coninco-ink px-5 py-3 text-right text-white"><div className="text-2xl font-black">{entries.length}</div><div className="text-[10px] font-bold uppercase tracking-wider text-white/55">saved audits</div></div></div><div className="flex items-center gap-3 rounded-2xl border border-coninco-line bg-white p-3 shadow-soft"><Search size={18} className="ml-2 text-coninco-muted"/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by workbook or sheet…" className="flex-1 bg-transparent px-2 py-2 text-sm outline-none"/><button onClick={() => setToast("Archive is stored locally") } className="rounded-xl border border-coninco-line px-4 py-2 text-xs font-black text-coninco-muted hover:border-coninco-red hover:text-coninco-red"><RefreshCw size={14}/></button></div><div className="overflow-hidden rounded-[24px] border border-coninco-line bg-white shadow-soft"><div className="border-b border-coninco-line px-6 py-5"><div className="flex items-center gap-2 text-sm font-black"><Archive size={17} className="text-coninco-red"/> Audit history</div></div><div className="overflow-x-auto"><table className="table-grid w-full min-w-[1320px] border-collapse text-left"><thead className="bg-[#fbfbfc] text-[10px] font-black uppercase tracking-wider text-coninco-muted"><tr><th className="px-5 py-4">Submitted workbook</th><th className="px-5 py-4">Processed result</th><th className="px-5 py-4">Sheet</th><th className="px-5 py-4">Rows</th><th className="px-5 py-4">Status</th><th className="px-5 py-4 text-right">Actions</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id} className="group hover:bg-[#fffafa]"><td className="px-5 py-5"><div className="flex items-center gap-3"><span className="rounded-xl bg-coninco-soft p-2.5 text-coninco-red"><FileSpreadsheet size={18}/></span><div><div className="text-sm font-bold">{entry.submittedName}</div><div className="mt-1 text-[11px] text-coninco-muted">{entry.createdAt}</div></div></div></td><td className="px-5 py-5"><div className="text-sm font-bold text-coninco-ink">{entry.processedName}</div><div className="mt-1 text-[11px] text-coninco-muted">{entry.mismatches} mismatched cells</div></td><td className="px-5 py-5"><span className="rounded-lg bg-[#f1f2f3] px-2.5 py-1 text-xs font-black">{entry.sheet}</span></td><td className="px-5 py-5 text-sm font-black">{entry.rows}</td><td className="px-5 py-5"><span className={`rounded-full px-3 py-1.5 text-[10px] font-black ${entry.status === "COMPLETED" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{entry.status}</span></td><td className="whitespace-nowrap px-5 py-5"><div className="flex justify-end gap-2"><button onClick={() => viewComparison(entry)} className="rounded-xl bg-coninco-red px-3 py-2 text-[10px] font-black text-white hover:bg-coninco-dark">VIEW COMPARISON</button><DownloadButton entry={entry} setToast={setToast}/><button onClick={() => void removeEntry(entry)} title="Delete" className="rounded-xl border border-red-100 p-2 text-red-400 hover:bg-red-50"><Trash2 size={15}/></button></div></td></tr>)}</tbody></table>{!entries.length && <div className="px-6 py-14 text-center text-sm text-coninco-muted">No archived workbooks found.</div>}</div></div></div>;
 }
 
+/** Render row-level values, match flags, and formula-error details. */
 function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; rows: ComparisonRow[]; back: () => void; setToast: (value: string) => void }) {
   const inputHeaders = ["ROW", "ITEM NO", "PRODUCT NAME", "UNIT", "SECTION", "PRODUCT TYPE", "W", "H", "W'", "H'", "W''", "H''", "L/M", "R/D", "a", "t", "Q", "PLAN", "UP-DOWN", "VERTICAL AXIS", "FORMULA DETAIL", "ACOUSTIC / FIREPROOF", "NOTE"];
   const hasSeparateFireproofAndAcoustic = rows.some((row) => row.quantityLayout === "three");
@@ -328,11 +352,15 @@ function ComparisonPage({ entry, rows, back, setToast }: { entry: ArchiveEntry; 
   </div>;
 }
 
+/** Sort audit targets in the same order as the workbook outputs. */
 const formulaTargetOrder = (target: string) => ({ K: 0, S: 1, S_fireproof: 2, S_inner: 2 }[target] ?? 9);
+/** Convert internal audit target names into user-facing labels. */
 const formulaTargetLabel = (target: string) => ({ K: "K", S: "S / SCN", S_fireproof: "SCC", S_inner: "STA / SCC-TA" }[target] ?? target.toUpperCase());
 
+/** Add fallback audit rows when an older preview lacks formula metadata. */
 function mismatchedFormulaAudits(row: ComparisonRow): FormulaAudit[] {
   const audits = new Map(row.formulaAudits.map((audit) => [audit.target, audit]));
+  /** Preserve a visible mismatch even when only numeric legacy data exists. */
   const fallback = (target: string, label: string, originalValue: number, calculatedValue: number, detail: string): FormulaAudit => ({
     target,
     label,
@@ -363,6 +391,7 @@ function mismatchedFormulaAudits(row: ComparisonRow): FormulaAudit[] {
     .sort((left, right) => formulaTargetOrder(left.target) - formulaTargetOrder(right.target));
 }
 
+/** Render the formula-only review shown after a numeric mismatch. */
 function FormulaErrorTable({ items }: { items: Array<{ row: ComparisonRow; audit: FormulaAudit }> }) {
   return <section className={`overflow-hidden rounded-[24px] border bg-white shadow-soft ${items.length ? "border-red-200" : "border-emerald-200"}`}>
     <div className={`flex items-center justify-between border-b px-6 py-5 ${items.length ? "border-red-100 bg-red-50/70" : "border-emerald-100 bg-emerald-50/70"}`}>
@@ -373,6 +402,7 @@ function FormulaErrorTable({ items }: { items: Array<{ row: ComparisonRow; audit
   </section>;
 }
 
+/** Render original and standard versions of one failed target side by side. */
 function FormulaErrorPair({ row, audit }: { row: ComparisonRow; audit: FormulaAudit }) {
   const label = audit.label || formulaTargetLabel(audit.target);
   const sourceComparison = audit.sourceFormulaComparison ?? audit.formulaComparison;
@@ -445,6 +475,7 @@ function FormulaErrorPair({ row, audit }: { row: ComparisonRow; audit: FormulaAu
 
 type FormulaComparisonBlock = NonNullable<FormulaAudit["formulaComparison"]>["blocks"][number];
 
+/** Color original formula blocks according to their AST match status. */
 function OriginalFormulaText({ value, comparison }: { value: string; comparison?: FormulaAudit["sourceFormulaComparison"] }) {
   const spans = (comparison?.blocks ?? [])
     .flatMap((block) => (block.originalSpans ?? []).map((span) => ({
@@ -470,6 +501,7 @@ function OriginalFormulaText({ value, comparison }: { value: string; comparison?
   </div>;
 }
 
+/** Render standard formula blocks with blue/red block-level status. */
 function FormulaBlockList({ blocks, fallback }: { blocks: FormulaComparisonBlock[]; fallback?: string }) {
   if (!blocks.length) {
     return <div className="min-w-max whitespace-nowrap font-mono text-[11px] font-black" style={{ color: "#B91C1C" }}>{formatFormulaForDisplay(fallback || "Formula not available")}</div>;
@@ -488,9 +520,11 @@ function FormulaBlockList({ blocks, fallback }: { blocks: FormulaComparisonBlock
   </div>;
 }
 
+/** Highlight AST mismatch fragments inside one displayed formula string. */
 function FormulaWithAstHighlights({ blockLabel, value, highlights, blockHighlights = [] }: { blockLabel: string; value: string; highlights: string[]; blockHighlights?: string[] }) {
   const text = formatFormulaForDisplay(value || highlights.join(" · ") || "Formula text missing");
   const isIntermediateBlock = /^S_V\d+$/i.test(blockLabel);
+  /** Locate normalized highlight text while tolerating display whitespace. */
   const findRanges = (values: string[], kind: "light" | "dark") => values.flatMap((highlight) => {
     const target = formatFormulaForDisplay(highlight);
     if (!target) return [];
@@ -517,6 +551,7 @@ function FormulaWithAstHighlights({ blockLabel, value, highlights, blockHighligh
   return <span className={`whitespace-nowrap font-mono text-[10px] leading-5 ${isIntermediateBlock ? "rounded bg-red-50/80 px-1" : "text-coninco-ink"}`}>{parts.length ? parts : text}</span>;
 }
 
+/** Show the exact AST branches that differ between original and standard text. */
 function AstDifferenceList({ blocks, originalFormula }: { blocks: FormulaComparisonBlock[]; originalFormula: string }) {
   const differences = blocks
     .filter((block) => (block.astDifferences ?? []).length)
@@ -543,12 +578,17 @@ function AstDifferenceList({ blocks, originalFormula }: { blocks: FormulaCompari
   </div>;
 }
 
+/** Render one summary metric card. */
 function Metric({ label, value, icon, danger = false }: { label: string; value: string; icon: React.ReactNode; danger?: boolean }) { return <div className="rounded-2xl border border-coninco-line bg-white p-5 shadow-soft"><div className="flex items-center justify-between text-coninco-muted"><span className="text-[10px] font-black uppercase tracking-wider">{label}</span><span className={danger ? "text-coninco-red" : "text-coninco-red"}>{icon}</span></div><div className={`mt-3 text-2xl font-black ${danger ? "text-coninco-red" : "text-coninco-ink"}`}>{value}</div></div>; }
+/** Render a compact section/category badge. */
 function Tag({ value }: { value: string }) { return <span className="rounded-lg bg-coninco-soft px-2.5 py-1 text-[10px] font-black capitalize text-coninco-red">{value}</span>; }
+/** Render a compact MATCH or DIFF status badge. */
 function CheckCell({ match }: { match: boolean }) { return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-black ${match ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{match ? <Check size={12}/> : <X size={12}/>} {match ? "MATCH" : "DIFF"}</span>; }
 
+/** Offer submitted and processed workbook download actions. */
 function DownloadButton({ entry, setToast }: { entry: ArchiveEntry; setToast: (value: string) => void }) {
   const [open, setOpen] = useState(false);
+  /** Download the requested archive version and report the resulting path. */
   const download = async (kind: "submitted" | "processed") => {
     setOpen(false);
     try {

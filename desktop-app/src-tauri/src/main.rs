@@ -34,10 +34,12 @@ struct AuditResult {
     reference_formulas: i64,
 }
 
+// Return the per-user application directory used for archive and reference data.
 fn app_root(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|error| error.to_string())
 }
 
+// Open the local SQLite archive and create its table on first use.
 fn database(app: &AppHandle) -> Result<Connection, String> {
     let root = app_root(app)?;
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
@@ -47,27 +49,33 @@ fn database(app: &AppHandle) -> Result<Connection, String> {
 }
 
 #[tauri::command]
+// Show the contractor workbook picker.
 fn choose_workbook() -> Option<String> {
     FileDialog::new().add_filter("Excel workbook", &["xlsx", "xls"]).pick_file().map(|path| path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
+// Show the standard formula workbook picker, including Apple Numbers files.
 fn choose_reference_workbook() -> Option<String> {
     FileDialog::new().add_filter("Formula reference workbook", &["xlsx", "xls", "numbers"]).pick_file().map(|path| path.to_string_lossy().to_string())
 }
 
+// Return the private directory where a copied standard workbook is stored.
 fn reference_storage_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_root(app)?.join("formula-reference"))
 }
 
+// Return the text manifest that remembers the saved standard workbook path.
 fn reference_manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_root(app)?.join("formula-reference-path.txt"))
 }
 
+// Return the JSON cache path for the parsed standard formula catalog.
 fn formula_catalog_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(reference_storage_dir(app)?.join("formula-catalog.json"))
 }
 
+// Remove either a file or directory when it exists.
 fn remove_path(path: &Path) -> Result<(), String> {
     if path.is_dir() {
         fs::remove_dir_all(path).map_err(|error| error.to_string())?;
@@ -77,6 +85,7 @@ fn remove_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// Copy a file or recursively copy an Apple Numbers package directory.
 fn copy_path(source: &Path, destination: &Path) -> Result<(), String> {
     if source.is_dir() {
         fs::create_dir_all(destination).map_err(|error| error.to_string())?;
@@ -98,6 +107,7 @@ fn cached_formula_catalog(
     reference_path: &Path,
     reference_sheet: &str,
 ) -> Result<Option<Value>, String> {
+    // Reuse only a cache tied to the same reference path and worksheet.
     let cache_path = formula_catalog_cache_path(app)?;
     if !cache_path.is_file() {
         return Ok(None);
@@ -121,6 +131,7 @@ fn load_or_create_formula_catalog(
     reference_path: &Path,
     reference_sheet: &str,
 ) -> Result<Value, String> {
+    // Formula workflow: reuse the cached catalog or build it from the selected sheet.
     if let Some(catalog) = cached_formula_catalog(app, reference_path, reference_sheet)? {
         return Ok(catalog);
     }
@@ -145,6 +156,7 @@ fn load_or_create_formula_catalog(
 }
 
 #[tauri::command]
+// Return the saved reference path only when the copied source still exists.
 fn get_reference_workbook(app: AppHandle) -> Result<Option<String>, String> {
     let manifest = reference_manifest_path(&app)?;
     if !manifest.is_file() {
@@ -156,7 +168,9 @@ fn get_reference_workbook(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+// Replace the stored reference atomically and invalidate its old catalog cache.
 fn save_reference_workbook(app: AppHandle, path: String) -> Result<String, String> {
+    // Formula workflow: copy the selected reference file into app storage.
     let source = PathBuf::from(path);
     if !source.is_file() && !source.is_dir() {
         return Err("Formula reference workbook does not exist.".into());
@@ -178,25 +192,30 @@ fn save_reference_workbook(app: AppHandle, path: String) -> Result<String, Strin
 }
 
 #[tauri::command]
+// Remove the saved reference, manifest, and cached catalog.
 fn clear_reference_workbook(app: AppHandle) -> Result<(), String> {
     remove_path(&reference_storage_dir(&app)?)?;
     remove_path(&reference_manifest_path(&app)?)
 }
 
 #[tauri::command]
+// Ask Python to inspect the contractor workbook and list its worksheets.
 fn list_sheets(app: AppHandle, path: String) -> Result<Vec<String>, String> {
     let response = run_engine(&app, serde_json::json!({"action": "list_sheets", "path": path}))?;
     response.get("result").and_then(|result| result.get("sheets")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| item.get("name").and_then(Value::as_str)).map(String::from).collect()).ok_or_else(|| "Python did not return worksheets.".into())
 }
 
 #[tauri::command]
+// Ask Python to inspect the standard workbook and list its worksheets.
 fn list_reference_sheets(app: AppHandle, path: String) -> Result<Vec<String>, String> {
     let response = run_engine(&app, serde_json::json!({"action": "list_reference_sheets", "path": path}))?;
     response.get("result").and_then(|result| result.get("sheets")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| item.get("name").and_then(Value::as_str)).map(String::from).collect()).ok_or_else(|| "Python did not return reference worksheets.".into())
 }
 
 #[tauri::command]
+// Return parsed catalog entries for the selected standard worksheet.
 fn load_reference_catalog(app: AppHandle, path: String, sheet: String) -> Result<Vec<Value>, String> {
+    // Formula workflow: expose standard entries to the catalog page.
     let catalog = load_or_create_formula_catalog(&app, &PathBuf::from(path), &sheet)?;
     catalog
         .get("entries")
@@ -206,6 +225,7 @@ fn load_reference_catalog(app: AppHandle, path: String, sheet: String) -> Result
 }
 
 #[tauri::command]
+// Save the parsed catalog to a user-selected JSON path.
 fn export_formula_catalog(app: AppHandle, path: String, sheet: String) -> Result<Option<String>, String> {
     let reference = PathBuf::from(path);
     let catalog = load_or_create_formula_catalog(&app, &reference, &sheet)?;
@@ -227,10 +247,14 @@ fn export_formula_catalog(app: AppHandle, path: String, sheet: String) -> Result
 }
 
 #[tauri::command]
+// Run the full audit, preserve both workbooks, and register the result in SQLite.
 fn run_audit(app: AppHandle, path: String, sheet: String, reference_path: String, reference_sheet: String) -> Result<AuditResult, String> {
+    // Run Audit step 1: resolve the submitted workbook and standard reference.
     let source = PathBuf::from(path);
     let reference = PathBuf::from(reference_path);
+    // Run Audit step 2: load the authoritative formula catalog.
     let catalog = load_or_create_formula_catalog(&app, &reference, &reference_sheet)?;
+    // Run Audit step 3: create archive folders and unique output paths.
     let root = app_root(&app)?;
     let id = Uuid::new_v4().to_string();
     let submitted_dir = root.join("submitted");
@@ -239,18 +263,23 @@ fn run_audit(app: AppHandle, path: String, sheet: String, reference_path: String
     fs::create_dir_all(&processed_dir).map_err(|error| error.to_string())?;
     let submitted = submitted_dir.join(format!("{}_{}", &id[..8], source.file_name().unwrap_or_default().to_string_lossy()));
     let processed = processed_dir.join(format!("{}_calculated.xlsx", id));
+    // Run Audit step 4: preserve the original submitted workbook in the archive.
     fs::copy(&source, &submitted).map_err(|error| error.to_string())?;
+    // Run Audit step 5: ask Python to map, calculate, compare, and export.
     let response = run_engine(&app, serde_json::json!({"action":"export_calculated_workbook", "path": submitted, "output": processed, "sheet": sheet, "reference_path": reference, "reference_sheet": reference_sheet, "reference_catalog": catalog}))?;
+    // Run Audit step 6: read Python's summary for the UI and archive record.
     let result = response.get("result").ok_or("Python did not return an audit result")?;
     let rows = result.get("calculated_count").and_then(Value::as_i64).unwrap_or(0);
     let mismatches = result.get("mismatch_count").and_then(Value::as_i64).unwrap_or(0);
     let reference_formulas = result.get("reference_formula_count").and_then(Value::as_i64).unwrap_or(0);
+    // Run Audit step 7: store the processed workbook and mismatch summary.
     let connection = database(&app)?;
     connection.execute("INSERT INTO audits VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'COMPLETED', ?7, ?8, ?9)", params![id, submitted.to_string_lossy(), processed.to_string_lossy(), source.file_name().unwrap_or_default().to_string_lossy(), processed.file_name().unwrap_or_default().to_string_lossy(), sheet, rows, mismatches, Utc::now().to_rfc3339()]).map_err(|error| error.to_string())?;
     Ok(AuditResult { id, submitted_name: source.file_name().unwrap_or_default().to_string_lossy().to_string(), processed_name: processed.file_name().unwrap_or_default().to_string_lossy().to_string(), sheet, rows, mismatches, reference_formulas })
 }
 
 fn run_engine(app: &AppHandle, request: Value) -> Result<Value, String> {
+    // Bridge one JSON request from Tauri to the Python engine and return its response.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let python = root.join("python-engine/.venv/bin/python");
     let bundled_engine = app.path().resource_dir().map_err(|error| error.to_string())?.join("engine/excel-auditor-engine");
@@ -268,6 +297,7 @@ fn run_engine(app: &AppHandle, request: Value) -> Result<Value, String> {
 }
 
 #[tauri::command]
+// Read archived audit metadata for the Archive page.
 fn list_archive(app: AppHandle) -> Result<Vec<ArchiveEntry>, String> {
     let connection = database(&app)?;
     let mut query = connection.prepare("SELECT id, submitted_name, processed_name, sheet, status, rows, mismatches, created_at FROM audits ORDER BY created_at DESC").map_err(|error| error.to_string())?;
@@ -276,6 +306,7 @@ fn list_archive(app: AppHandle) -> Result<Vec<ArchiveEntry>, String> {
 }
 
 #[tauri::command]
+// Delete one audit's stored files, preview, and database row.
 fn delete_archive(app: AppHandle, id: String) -> Result<(), String> {
     let connection = database(&app)?;
     let paths: (String, String) = connection.query_row("SELECT submitted_path, processed_path FROM audits WHERE id = ?1", [&id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(|error| error.to_string())?;
@@ -294,6 +325,7 @@ fn delete_archive(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Copy the submitted or processed workbook to a user-selected destination.
 fn download_archive(app: AppHandle, id: String, kind: String) -> Result<String, String> {
     let connection = database(&app)?;
     let column = if kind == "processed" { "processed_path" } else { "submitted_path" };
@@ -306,6 +338,7 @@ fn download_archive(app: AppHandle, id: String, kind: String) -> Result<String, 
 }
 
 #[tauri::command]
+// Open the submitted or processed workbook with the platform default app.
 fn open_archive_file(app: AppHandle, id: String, kind: String) -> Result<(), String> {
     let connection = database(&app)?;
     let column = if kind == "processed" { "processed_path" } else { "submitted_path" };
@@ -316,6 +349,7 @@ fn open_archive_file(app: AppHandle, id: String, kind: String) -> Result<(), Str
 }
 
 #[tauri::command]
+// Load the TSV comparison preview generated alongside the processed workbook.
 fn load_comparison(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
     let connection = database(&app)?;
     let path: String = connection.query_row("SELECT processed_path FROM audits WHERE id = ?1", [&id], |row| row.get(0)).map_err(|error| error.to_string())?;
@@ -345,6 +379,7 @@ fn load_comparison(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+// Build the Tauri application and register every frontend command.
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![choose_workbook, choose_reference_workbook, get_reference_workbook, save_reference_workbook, clear_reference_workbook, list_sheets, list_reference_sheets, load_reference_catalog, export_formula_catalog, run_audit, list_archive, delete_archive, download_archive, open_archive_file, load_comparison])

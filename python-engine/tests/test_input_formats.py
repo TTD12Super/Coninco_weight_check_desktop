@@ -1,3 +1,5 @@
+"""Unit tests for workbook header detection and quantity-column mapping."""
+
 import unittest
 
 import pandas as pd
@@ -11,10 +13,13 @@ from excel_engine.input_formats import (
 
 
 class InputFormatsTest(unittest.TestCase):
+    """Verify flexible contractor headers map to stable internal names."""
+    # Confirm the known Sheet 02 headers map to internal field names.
     def test_sheet_02_maps_formula_columns(self) -> None:
         self.assertEqual("W", SHEET_02_COLUMN_MAP["Unnamed: 5"])
         self.assertEqual("K", SHEET_02_COLUMN_MAP["Unnamed: 16"])
 
+    # Confirm every supported Sheet 02 product has an input format.
     def test_product_formats_cover_sheet_02_products(self) -> None:
         for product_type in (
             "rectangular_duct",
@@ -27,6 +32,7 @@ class InputFormatsTest(unittest.TestCase):
         ):
             self.assertIn(product_type, PRODUCT_INPUT_FORMATS)
 
+    # Confirm header detection survives a missing duplicate Unit column.
     def test_header_detection_handles_missing_duplicate_unit_column(self) -> None:
         columns = [None] * 24
         columns[1] = "No."
@@ -43,6 +49,7 @@ class InputFormatsTest(unittest.TestCase):
         self.assertEqual(5, detected["H"])
         self.assertEqual(15, detected["K"])
 
+    # Confirm separate SCN, SCC, and STA columns map independently.
     def test_quantity_mapping_supports_three_named_columns(self) -> None:
         columns = [None] * 24
         columns[1] = "No."
@@ -63,6 +70,7 @@ class InputFormatsTest(unittest.TestCase):
         self.assertEqual("scc_quantity", quantity_column_for_target(detected, "SCC"))
         self.assertEqual("sta_quantity", quantity_column_for_target(detected, "STA"))
 
+    # Confirm legacy two-column layouts use the shared SCC/TA fallback.
     def test_quantity_mapping_keeps_two_column_scc_fallback(self) -> None:
         columns = [None] * 24
         columns[20] = "Khối lượng cách nhiệt (m2)"

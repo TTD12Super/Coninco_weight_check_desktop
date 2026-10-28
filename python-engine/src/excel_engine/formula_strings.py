@@ -187,48 +187,85 @@ _PRODUCT_SUFFIX = {
 }
 
 
+# Purpose: Replace symbolic input names with row-specific Excel cell references.
+# Example output: "2*F21*G21"
 def _replace_references(formula: str, references: Mapping[str, str] | None) -> str:
+    """Replace symbolic input names with row-specific Excel cell references."""
+    # Check this condition before choosing the next branch.
     if not references:
+        # Return the value produced by this step.
         return formula
+    # Compute and store: result.
     result = formula
+    # Process each item in this input sequence.
     for symbol in sorted(_SYMBOLS, key=len, reverse=True):
+        # Compute and store: reference.
         reference = references.get(symbol)
+        # Check this condition before choosing the next branch.
         if reference:
+            # Compute and store: result.
             result = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])", reference, result)
+    # Return the value produced by this step.
     return result
 
 
+# Purpose: Return source-sheet cell references for ``FormulaInputs`` at ``row``.
+# Example output: {"W": "F21", "H": "G21", "K": "Q21"}
 def excel_input_references(row: int, column_map: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return source-sheet cell references for ``FormulaInputs`` at ``row``."""
+    # Compute and store: columns.
     columns = dict(_SOURCE_COLUMNS)
+    # Check this condition before choosing the next branch.
     if column_map:
+        # Execute this expression for its result or side effect.
         columns.update(column_map)
+    # Return the value produced by this step.
     return {symbol: f"{columns[symbol]}{row}" for symbol in _SYMBOLS}
 
 
+# Purpose: Return the Excel R/S/T formulas for one section and product type.
+# Example output: ("=2*F21*G21", "=0", "=0")
 def formula_strings(
     section: str,
     product_type: str,
     references: Mapping[str, str] | None = None,
 ) -> tuple[str, str, str]:
     """Return the Excel R/S/T formulas for one section and product type."""
+    # Compute and store: normalized_product.
     normalized_product = str(product_type).strip().lower()
+    # Compute and store: suffix.
     suffix = _PRODUCT_SUFFIX.get(normalized_product, normalized_product)
+    # Compute and store: key.
     key = f"_{str(section).strip().lower()}_{suffix}"
+    # Protect parsing/evaluation so bad workbook data becomes a controlled error.
     try:
+        # Compute and store: formulas.
         formulas = _FORMULAS[key]
     except KeyError as error:
+        # Stop with a clear validation error for invalid input.
         raise ValueError(f"No Excel formula strings for {section}/{product_type}") from error
+    # Return the value produced by this step.
     return tuple(_replace_references(formula, references) for formula in formulas)  # type: ignore[return-value]
 
 
+# Purpose: Create one public wrapper for an R, S, or T formula string.
+# Example output: <function _standard_rectangular_formula>
 def _make_formula_function(function_name: str, output_index: int):
+    """Create one public wrapper for an R, S, or T formula string."""
+    # Purpose: Return the selected output formula with optional cell references.
+    # Example output: "2*F21*G21"
     def formula_function(references: Mapping[str, str] | None = None) -> str:
+        """Return the selected output formula with optional cell references."""
+        # Compute and store: formulas.
         formulas = _FORMULAS[function_name]
+        # Return the value produced by this step.
         return _replace_references(formulas[output_index], references)
 
+    # Compute and store: formula_function.__name__.
     formula_function.__name__ = f"{function_name}_formula" if output_index == 0 else f"{function_name}_{'s' if output_index == 1 else 't'}_formula"
+    # Compute and store: formula_function.__doc__.
     formula_function.__doc__ = f"Return the Excel formula for {function_name} output {output_index}."
+    # Return the value produced by this step.
     return formula_function
 
 

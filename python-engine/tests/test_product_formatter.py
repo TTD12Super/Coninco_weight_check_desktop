@@ -1,9 +1,13 @@
+"""Unit tests for product classification and row-to-input conversion."""
+
 import unittest
 
 from excel_engine.product_formatter import ProductFormat, calculate_section
 
 
 class ProductFormatTest(unittest.TestCase):
+    """Verify descriptions and sections select the expected calculator."""
+    # Confirm a normal rectangular duct selects the standard calculator.
     def test_formats_standard_rectangular_duct(self) -> None:
         row = {
             "description": "Fresh air duct 800x400",
@@ -20,6 +24,7 @@ class ProductFormatTest(unittest.TestCase):
         self.assertEqual("rectangular_duct", product.product_type)
         self.assertAlmostEqual(15.12, result.R)
 
+    # Confirm an explicit fireproof section overrides default classification.
     def test_section_column_selects_fireproof_section(self) -> None:
         row = {
             "description": "Reducer 360x360-350x350",
@@ -38,6 +43,7 @@ class ProductFormatTest(unittest.TestCase):
         self.assertEqual("fireproof", product.section)
         self.assertEqual("reducer", product.product_type)
 
+    # Confirm an STA label identifies the acoustic family.
     def test_calculate_section_from_sta_formula(self) -> None:
         row = {
             "description": "Reducer 360x360-350x350",
@@ -46,6 +52,7 @@ class ProductFormatTest(unittest.TestCase):
 
         self.assertEqual("acoustic", calculate_section(row))
 
+    # Confirm a shared SCC/TA label identifies the acoustic family.
     def test_calculate_section_from_scc_ta_formula(self) -> None:
         row = {
             "description": "Reducer 360x360-350x350",

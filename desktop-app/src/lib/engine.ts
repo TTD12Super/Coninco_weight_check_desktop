@@ -1,6 +1,9 @@
+/** UI-to-Tauri bridge and preview-data normalization for the desktop app. */
+
 import { invoke } from "@tauri-apps/api/core";
 import type { ArchiveEntry, AuditResult, ComparisonRow, FormulaAudit, FormulaCatalogEntry } from "../types";
 
+/** Detect whether the React UI is running inside Tauri or in browser preview mode. */
 const isDesktop = () => Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
 const demoRows: ComparisonRow[] = [
@@ -39,27 +42,35 @@ const demoArchive: ArchiveEntry[] = [{
   sheet: "02", status: "COMPLETED", rows: 15, mismatches: 1, createdAt: "Today, 10:24",
 }];
 
+/** Ask the native file dialog for the contractor workbook. */
 export const chooseWorkbook = () =>
   isDesktop() ? invoke<string | null>("choose_workbook") : Promise.resolve("/demo/L01GF0087.xls");
 
+/** Ask the native file dialog for the standard formula workbook. */
 export const chooseReferenceWorkbook = () =>
   isDesktop() ? invoke<string | null>("choose_reference_workbook") : Promise.resolve("/demo/formula-reference.xlsx");
 
+/** Read the saved standard workbook path from native app storage. */
 export const loadReferenceWorkbook = () =>
   isDesktop() ? invoke<string | null>("get_reference_workbook") : Promise.resolve("/demo/formula-reference.xlsx");
 
+/** Copy and persist the selected standard workbook through Tauri. */
 export const saveReferenceWorkbook = (path: string) =>
   isDesktop() ? invoke<string>("save_reference_workbook", { path }) : Promise.resolve(path);
 
+/** Remove the persisted standard-workbook reference. */
 export const clearReferenceWorkbook = () =>
   isDesktop() ? invoke<void>("clear_reference_workbook") : Promise.resolve();
 
+/** List worksheets in the contractor workbook before audit starts. */
 export const listSheets = (path: string) =>
   isDesktop() ? invoke<string[]>("list_sheets", { path }) : Promise.resolve(["02", "COMBINE"]);
 
+/** List worksheets available in the standard formula workbook. */
 export const listReferenceSheets = (path: string) =>
   isDesktop() ? invoke<string[]>("list_reference_sheets", { path }) : Promise.resolve(["COMBINE"]);
 
+/** Load catalog entries and normalize Python snake_case fields for React. */
 export const loadFormulaCatalog = (path: string, sheet: string) =>
   isDesktop()
     ? invoke<FormulaCatalogEntry[]>("load_reference_catalog", { path, sheet }).then((entries) => entries.map((entry) => ({
@@ -71,11 +82,13 @@ export const loadFormulaCatalog = (path: string, sheet: string) =>
       })))
     : Promise.resolve<FormulaCatalogEntry[]>([]);
 
+/** Export the parsed standard catalog as JSON for inspection or reuse. */
 export const exportFormulaCatalog = (path: string, sheet: string) =>
   isDesktop()
     ? invoke<string | null>("export_formula_catalog", { path, sheet })
     : Promise.resolve<string | null>("/demo/formula-catalog.json");
 
+/** Run the complete native audit and return its archive summary. */
 export const runAudit = (path: string, sheet: string, referencePath: string, referenceSheet: string) =>
   isDesktop()
     ? invoke<AuditResult>("run_audit", { path, sheet, referencePath, referenceSheet })
@@ -84,13 +97,17 @@ export const runAudit = (path: string, sheet: string, referencePath: string, ref
         sheet, rows: 15, mismatches: 1, referenceFormulas: 63,
       });
 
+/** Load previously completed audits from the local archive database. */
 export const listArchive = () =>
   isDesktop() ? invoke<ArchiveEntry[]>("list_archive") : Promise.resolve(demoArchive);
 
+/** Parse a preview cell as a number without exposing NaN to the UI. */
 const number = (value: string | undefined) => Number.parseFloat(value ?? "") || 0;
+/** Parse the Python text representation of a boolean match flag. */
 const bool = (value: string | undefined) => value === "True" || value === "true";
 const formulaMatchBlue = "#1565C0";
 const formulaMismatchRed = "#B91C1C";
+/** Read stored input-cell references, with a legacy-layout fallback. */
 const inputReferences = (value: string | undefined, sourceRow: number): Record<string, string> => {
   try {
     const parsed = JSON.parse(value || "{}");
@@ -104,6 +121,7 @@ const inputReferences = (value: string | undefined, sourceRow: number): Record<s
     a: `N${sourceRow}`, t: `O${sourceRow}`, Q: `P${sourceRow}`, K: `Q${sourceRow}`,
   };
 };
+/** Decode formula-audit JSON and tolerate old TSV/CSV preview encodings. */
 const formulaAudits = (value: string | undefined): FormulaAudit[] => {
   if (!value) return [];
   try {
@@ -127,6 +145,7 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
     }
     if (!Array.isArray(parsedValue)) return [];
     const parsed = parsedValue as Array<Record<string, unknown>>;
+    /** Normalize one nested formula-comparison payload from Python. */
     const formulaComparison = (value: unknown): FormulaAudit["formulaComparison"] => {
       if (!value || typeof value !== "object") return undefined;
       const comparison = value as Record<string, unknown>;
@@ -146,6 +165,7 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
           const blockColor = status === "matched" ? formulaMatchBlue : formulaMismatchRed;
           const matchedComponents = Array.isArray(block.matched_components ?? block.matchedComponents)
             ? ((block.matched_components ?? block.matchedComponents) as Array<Record<string, unknown>>).map((component) => {
+              /** Convert serialized highlight spans into numeric UI ranges. */
               const mapSpans = (raw: unknown) => Array.isArray(raw) ? raw.map((span) => {
                 const item = span as Record<string, unknown>;
                 return { start: Number(item.start ?? 0), end: Number(item.end ?? 0) };
@@ -216,6 +236,7 @@ const formulaAudits = (value: string | undefined): FormulaAudit[] => {
     return [];
   }
 };
+/** Convert one tabular preview row into the strongly typed comparison model. */
 const rowFromPreview = (row: Record<string, string>): ComparisonRow => ({
   sourceRow: Number.parseInt(row.source_row ?? "0", 10), itemNo: row.item_no ?? "", description: row.description ?? "",
   unit: row.unit ?? "", section: row.section ?? "", productType: row.product_type ?? "", w: number(row.w), h: number(row.h),
@@ -231,17 +252,21 @@ const rowFromPreview = (row: Record<string, string>): ComparisonRow => ({
   formulaAudits: formulaAudits(row.formula_audits),
 });
 
+/** Load and normalize all comparison rows for one archived audit. */
 export const loadComparison = async (id: string) => {
   if (!isDesktop()) return demoRows;
   const raw = await invoke<Record<string, string>[]>("load_comparison", { id });
   return raw.map(rowFromPreview);
 };
 
+/** Delete one archived audit and its stored files through Tauri. */
 export const deleteArchive = (id: string) =>
   isDesktop() ? invoke<void>("delete_archive", { id }) : Promise.resolve();
 
+/** Open a save dialog and copy either the submitted or processed workbook. */
 export const downloadArchive = (id: string, kind: "submitted" | "processed") =>
   isDesktop() ? invoke<string>("download_archive", { id, kind }) : Promise.resolve("/demo/downloaded-file.xlsx");
 
+/** Open an archived workbook with the operating system's default application. */
 export const openArchiveFile = (id: string, kind: "submitted" | "processed") =>
   isDesktop() ? invoke<void>("open_archive_file", { id, kind }) : Promise.resolve();

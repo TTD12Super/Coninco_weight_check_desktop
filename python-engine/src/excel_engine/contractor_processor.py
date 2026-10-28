@@ -39,19 +39,32 @@ _COLUMN_NAMES = {
 }
 
 
+# Purpose: Read the contractor layout and return normalized rows.
+# Example output: DataFrame(normalized_rows=15)
 def read_contractor_sheet(path: str | Path, sheet_name: str = "02") -> pd.DataFrame:
     """Read the contractor layout and return normalized rows."""
+    # Compute and store: raw.
     raw = ExcelReader(path).read_sheet(sheet_name, skiprows=16, header=None)
+    # Compute and store: converter.
     converter = ExcelConverter(raw)
+    # Execute this expression for its result or side effect.
     converter.remove_columns([0, 3])
+    # Execute this expression for its result or side effect.
     converter.rename_columns(_COLUMN_NAMES)
+    # Execute this expression for its result or side effect.
     converter.add_k_by_function()
+    # Compute and store: data.
     data = converter.get_data()
+    # Compute and store: data['section'].
     data["section"] = data.apply(calculate_section, axis=1)
+    # Compute and store: geometry_columns.
     geometry_columns = ["W", "H", "W1", "H1", "W2", "H2", "L_M", "R_D"]
+    # Return the value produced by this step.
     return data.dropna(subset=geometry_columns, how="all").copy()
 
 
+# Purpose: Run the legacy row-by-row contractor calculation workflow.
+# Example output: {"calculated_count": 15, "calculated": [...], "errors": []}
 def process_workbook(
     path: str | Path,
     sheet_name: str | None = None,
@@ -59,23 +72,35 @@ def process_workbook(
     product_type: str | None = None,
     header_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Format each row and calculate R/S/T where the mapping is supported."""
+    """Run the legacy row-by-row contractor calculation workflow."""
+    # Execute this statement as part of the current workflow.
     del header_map  # The contractor layout is normalized by read_contractor_sheet.
+    # Compute and store: selected_sheet.
     selected_sheet = sheet_name or "02"
+    # Compute and store: data.
     data = read_contractor_sheet(path, selected_sheet)
+    # Compute and store: calculated.
     calculated: list[dict[str, Any]] = []
+    # Compute and store: errors.
     errors: list[dict[str, Any]] = []
 
+    # Process each item in this input sequence.
     for index, row in data.iterrows():
+        # Compute and store: row_data.
         row_data = row.to_dict()
+        # Compute and store: row_data['source_row'].
         row_data["source_row"] = int(index) + 17
+        # Protect parsing/evaluation so bad workbook data becomes a controlled error.
         try:
+            # Compute and store: product.
             product = ProductFormat.from_row(
                 row_data,
                 section=section,
                 product_type=product_type,
             )
+            # Compute and store: result.
             result = product.calculate(row_data)
+            # Execute this expression for its result or side effect.
             calculated.append(
                 {
                     "source_row": row_data["source_row"],
@@ -87,6 +112,7 @@ def process_workbook(
                 }
             )
         except (TypeError, ValueError) as error:
+            # Execute this expression for its result or side effect.
             errors.append(
                 {
                     "source_row": row_data["source_row"],
@@ -95,6 +121,7 @@ def process_workbook(
                 }
             )
 
+    # Return the value produced by this step.
     return {
         "path": str(Path(path).expanduser().resolve()),
         "sheet": selected_sheet,
